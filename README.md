@@ -1,0 +1,1 @@
+# mysql_fastapi_vue_sample_project
