@@ -6,6 +6,7 @@ import Test from "@/pages/Test.vue";
 import CheckUserInfo from "@/components/CheckUserInfo.vue";
 import Profile from "@/components/Profile.vue";
 import AddUser from "@/components/AddUser.vue";
+import Chat from "@/components/Chat.vue";
 import Register from "@/pages/Register.vue";
 
 const routes =
@@ -43,6 +44,10 @@ const routes =
                 {
                     path: 'addUser',
                     component: AddUser,
+                },
+                {
+                    path: 'chat',
+                    component: Chat,
                 },
             ]
 

@@ -1,4 +1,4 @@
-# 后端：FastAPI
+# 后端（业务层）：FastAPI
 
 ## 环境
 
@@ -16,7 +16,7 @@ pip install -r requirements.txt
 
 启动：
 ```shell
-uvicorn main:app
+uvicorn main:app --port 8000
 ```
 
 文档页面：`http://127.0.0.1:8000/docs`

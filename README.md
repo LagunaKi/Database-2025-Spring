@@ -1,3 +1,6 @@
 # FastAPI + Vue 示例项目
 
-前/后端位于`frontend`/`backend`目录。
+三层架构：
+- 界面：`frontend`
+- 业务层：`backend`
+- 算法层：`backend_algo`

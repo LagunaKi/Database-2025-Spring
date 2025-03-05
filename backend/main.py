@@ -13,6 +13,8 @@ import crud, models, schemas
 from database import SessionLocal, engine
 from security import verify_password
 
+import requests
+
 
 # to get a string like this run:
 # openssl rand -hex 32
@@ -166,3 +168,20 @@ async def read_user(
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
     return db_user
+
+
+@app.post("/chat", response_model=schemas.ChatResponse)
+async def chat(
+        current_user: Annotated[schemas.User, Depends(get_current_active_user)],
+        chat_request: schemas.ChatRequest
+):
+    # print(current_user.username)
+    resp = requests.post('http://localhost:8001/chat', json={
+        'messages': [
+            {
+                'role': 'user',
+                'content': chat_request.prompt,
+            }
+        ]
+    })
+    return schemas.ChatResponse(response=resp.json()['choices'][0]['message']['content'])

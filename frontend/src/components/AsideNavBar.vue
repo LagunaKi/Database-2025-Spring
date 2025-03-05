@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  ChatDotRound,
   Document,
   Menu as IconMenu,
   Setting,
@@ -35,6 +36,12 @@ function change(key: string, keyPath: string[]) {
         <setting/>
       </el-icon>
       <span>添加用户</span>
+    </el-menu-item>
+    <el-menu-item index="/index/chat">
+      <el-icon>
+        <ChatDotRound/>
+      </el-icon>
+      <span>聊天</span>
     </el-menu-item>
   </el-menu>
 </template>

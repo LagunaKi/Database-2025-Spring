@@ -50,6 +50,14 @@ interface UserList {
     users: User[]
 }
 
+interface LLMRequest {
+    prompt: string
+}
+
+interface LLMResponse {
+    response: string
+}
+
 //测试hello api
 export const TestHello = (): Res<null> =>
     instance.get('/api/hello');
@@ -72,3 +80,6 @@ export const GetUserInfoByUserName = (params: { userName: string }): Promise<Use
 
 export const GetUserInfoList = (params: { skip: number, limit: number }): Promise<UserList> =>
     instance.get(`/api/users/`, {params});
+
+export const ChatWithLLM = (data: LLMRequest): Promise<LLMResponse> =>
+    instance.post(`/api/chat`, data);
