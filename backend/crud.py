@@ -1,9 +1,8 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 
-import models, schemas
-
-from security import get_password_hash
+from . import models, schemas
+from .security import get_password_hash
 
 
 def get_user(db: Session, user_id: int):
@@ -69,14 +68,30 @@ def count_papers(db: Session):
 
 
 def search_papers(db: Session, query: str, limit: int = 10):
-    # Basic text search, will be enhanced with vector search later
-    search = f"%{query}%"
+    # Hybrid search: text search + vector search (when available)
+    from backend_algo.main import vector_search
+    
+    try:
+        # First try vector search
+        vector_results = vector_search(query, limit)
+        if vector_results:
+            paper_ids = [result["paper_id"] for result in vector_results]
+            return db.query(models.Paper).filter(
+                models.Paper.id.in_(paper_ids)
+            ).all()
+    except:
+        pass
+    
+    # Fallback to text search
+    keywords = query.split()
+    conditions = []
+    for keyword in keywords:
+        search = f"%{keyword}%"
+        conditions.append(models.Paper.title.ilike(search))
+        conditions.append(models.Paper.abstract.ilike(search))
+    
     return db.query(models.Paper).filter(
-        or_(
-            models.Paper.title.ilike(search),
-            models.Paper.abstract.ilike(search),
-            func.array_to_string(models.Paper.keywords, ',').ilike(search)
-        )
+        or_(*conditions)
     ).limit(limit).all()
 
 

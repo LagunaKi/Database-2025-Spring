@@ -10,9 +10,9 @@ from pydantic import BaseModel
 
 from sqlalchemy.orm import Session
 
-import crud, models, schemas
-from database import SessionLocal, engine
-from security import verify_password
+from backend import crud, models, schemas
+from backend.database import SessionLocal, engine
+from backend.security import verify_password
 
 import requests
 
@@ -43,7 +43,14 @@ app = FastAPI()
 # 添加CORS中间件
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174"],  # 前端开发服务器地址
+    allow_origins=[
+        "http://localhost:5173", 
+        "http://localhost:5174",
+        "http://localhost:3333",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "http://127.0.0.1:3333"
+    ],  # 前端开发服务器可能地址
     allow_credentials=True,
     allow_methods=["*"],  # 允许所有方法
     allow_headers=["*"],  # 允许所有头
@@ -186,6 +193,7 @@ async def chat(
         chat_request: schemas.ChatRequest
 ):
     try:
+        # 获取大模型回答
         resp = requests.post('http://localhost:8001/chat', json={
             'messages': [
                 {
@@ -194,10 +202,15 @@ async def chat(
                 }
             ]
         }, timeout=10)
-        resp.raise_for_status()  # 如果响应状态码不是200，抛出异常
+        resp.raise_for_status()
+        
+        # 搜索相关论文
+        db = next(get_session())
+        related_papers = crud.search_papers(db, query=chat_request.prompt, limit=5)
+        
         return schemas.ChatResponse(
             response=resp.json()['choices'][0]['message']['content'],
-            papers=[]
+            papers=related_papers
         )
     except requests.exceptions.RequestException as e:
         print(f"Error calling chat service: {str(e)}")
@@ -253,10 +266,10 @@ async def search_papers(
 
 @app.post("/api/papers/{paper_id}/interact")
 async def record_paper_interaction(
-        current_user: Annotated[schemas.User, Depends(get_current_active_user)],
-        paper_id: int,
-        action_type: str,
-        db: SessionDep
+    current_user: Annotated[schemas.User, Depends(get_current_active_user)],
+    paper_id: int,
+    action_type: str,
+    db: SessionDep
 ):
     db_paper = crud.get_paper(db, paper_id=paper_id)
     if db_paper is None:
@@ -269,3 +282,62 @@ async def record_paper_interaction(
     )
     crud.record_user_interaction(db=db, interaction=interaction)
     return {"message": "Interaction recorded"}
+
+# 调试接口 - 获取所有论文数据
+@app.get("/test/papers")
+async def debug_papers(db: SessionDep):
+    papers = crud.get_papers(db, skip=0, limit=100)
+    return {
+        "count": len(papers),
+        "papers": [
+            {
+                "id": paper.id,
+                "title": paper.title,
+                "authors": paper.authors,
+                "abstract": paper.abstract
+            } for paper in papers
+        ]
+    }
+
+# 调试接口 - 添加测试论文数据
+@app.post("/test/papers")
+async def add_test_papers(db: SessionDep):
+    test_papers = [
+        {
+            "title": "深度学习在自然语言处理中的应用",
+            "authors": ["张三", "李四"],
+            "abstract": "本文探讨了深度学习技术在NLP领域的最新进展",
+            "keywords": ["深度学习", "NLP"],
+            "published_date": "2023-01-01",
+            "pdf_url": "http://example.com/paper1.pdf"
+        },
+        {
+            "title": "基于Transformer的文本分类方法",
+            "authors": ["王五", "赵六"],
+            "abstract": "提出了一种改进的Transformer模型用于文本分类",
+            "keywords": ["Transformer", "文本分类"],
+            "published_date": "2023-02-01",
+            "pdf_url": "http://example.com/paper2.pdf"
+        }
+    ]
+    
+    created = []
+    try:
+        for paper_data in test_papers:
+            try:
+                paper = schemas.PaperCreate(**paper_data)
+                db_paper = crud.create_paper(db=db, paper=paper)
+                created.append({
+                    "id": db_paper.id,
+                    "title": db_paper.title
+                })
+            except Exception as e:
+                print(f"Error creating paper {paper_data['title']}: {str(e)}")
+                raise
+        
+        db.commit()
+        return {"message": "Test papers added", "papers": created}
+    except Exception as e:
+        db.rollback()
+        print(f"Error in add_test_papers: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
-import schemas
+from backend_algo import schemas
 import requests
 import chromadb
 import chromadb.utils.embedding_functions as embedding_functions

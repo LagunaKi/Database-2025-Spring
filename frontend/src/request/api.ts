@@ -88,6 +88,9 @@ interface Paper {
   authors: string[];
   year: number;
   abstract: string;
+  pdf_url: string;
+  keywords?: string[];
+  published_date?: string;
 }
 
 export const ChatWithLLM = (data: LLMRequest): Promise<LLMResponse> =>

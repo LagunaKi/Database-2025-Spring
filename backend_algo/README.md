@@ -27,3 +27,8 @@ uvicorn main:app --port 8001
 ```
 
 文档页面：`http://127.0.0.1:8001/docs`
+
+## 爬取论文
+
+首次运行：python backend_algo/arxiv_crawler.py
+启动定时服务：python backend_algo/sync_service.py

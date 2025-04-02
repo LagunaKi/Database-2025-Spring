@@ -14,11 +14,12 @@ const chatForm = reactive({
 });
 
 interface Paper {
-  id: string;
+  id: number;
   title: string;
   authors: string[];
-  year: number;
   abstract: string;
+  keywords?: string[];
+  pdf_url?: string;
 }
 
 const papers = ref<Paper[]>([]);
@@ -85,15 +86,23 @@ defineExpose({
       <div class="paper-container">
         <h3 style="color: white;">相关论文</h3>
         <el-table :data="papers" style="width: 100%">
-        <el-table-column prop="title" label="标题" />
-        <el-table-column prop="authors" label="作者" />
-        <el-table-column prop="year" label="年份" />
-        <el-table-column label="操作">
-          <template #default="scope">
-            <el-button type="primary" @click="viewPaperDetail(scope.row)">查看详情</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+          <el-table-column prop="title" label="标题" width="180" />
+          <el-table-column label="作者">
+            <template #default="{row}">
+              {{ row.authors.join(', ') }}
+            </template>
+          </el-table-column>
+          <el-table-column label="摘要" show-overflow-tooltip>
+            <template #default="{row}">
+              {{ row.abstract.substring(0, 30) }}...
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="120">
+            <template #default="scope">
+              <el-button type="primary" @click="viewPaperDetail(scope.row)">查看详情</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
       </div>
     </div>
   </div>
