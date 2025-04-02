@@ -3,6 +3,7 @@ from typing import Annotated
 
 import jwt
 from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jwt.exceptions import InvalidTokenError
 from pydantic import BaseModel
@@ -35,9 +36,18 @@ class TokenData(BaseModel):
     username: str | None = None
 
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/token")
 
 app = FastAPI()
+
+# 添加CORS中间件
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:5174"],  # 前端开发服务器地址
+    allow_credentials=True,
+    allow_methods=["*"],  # 允许所有方法
+    allow_headers=["*"],  # 允许所有头
+)
 
 
 # Dependency
@@ -100,7 +110,7 @@ async def get_current_active_user(
     return current_user
 
 
-@app.post("/token")
+@app.post("/api/token")
 async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: SessionDep
@@ -119,14 +129,14 @@ async def login_for_access_token(
     return Token(access_token=access_token, token_type="bearer")
 
 
-@app.get("/users/me/", response_model=schemas.User)
+@app.get("/api/users/me/", response_model=schemas.User)
 async def read_users_me(
     current_user: Annotated[schemas.User, Depends(get_current_active_user)],
 ):
     return current_user
 
 
-@app.post("/users/", response_model=schemas.User)
+@app.post("/api/users/", response_model=schemas.User)
 def create_user(user: schemas.UserCreate, db: SessionDep):
     db_user = crud.get_user_by_username(db, user.username)
     if db_user:
@@ -134,7 +144,7 @@ def create_user(user: schemas.UserCreate, db: SessionDep):
     return crud.create_user(db=db, user=user)
 
 
-@app.get("/users/", response_model=schemas.UserList)
+@app.get("/api/users/", response_model=schemas.UserList)
 async def read_users(
         current_user: Annotated[schemas.User, Depends(get_current_active_user)],
         db: SessionDep,
@@ -145,7 +155,7 @@ async def read_users(
     return schemas.UserList(total=crud.count_users(db), users=users)
 
 
-@app.get("/users/{user_id}", response_model=schemas.User)
+@app.get("/api/users/{user_id}", response_model=schemas.User)
 async def read_user(
         current_user: Annotated[schemas.User, Depends(get_current_active_user)],
         user_id: int,
@@ -157,7 +167,7 @@ async def read_user(
     return db_user
 
 
-@app.get("/users/name/{username}", response_model=schemas.User)
+@app.get("/api/users/name/{username}", response_model=schemas.User)
 async def read_user(
         current_user: Annotated[schemas.User, Depends(get_current_active_user)],
         username: str,
@@ -170,18 +180,92 @@ async def read_user(
     return db_user
 
 
-@app.post("/chat", response_model=schemas.ChatResponse)
+@app.post("/api/chat", response_model=schemas.ChatResponse)
 async def chat(
         current_user: Annotated[schemas.User, Depends(get_current_active_user)],
         chat_request: schemas.ChatRequest
 ):
-    # print(current_user.username)
-    resp = requests.post('http://localhost:8001/chat', json={
-        'messages': [
-            {
-                'role': 'user',
-                'content': chat_request.prompt,
-            }
-        ]
-    })
-    return schemas.ChatResponse(response=resp.json()['choices'][0]['message']['content'])
+    try:
+        resp = requests.post('http://localhost:8001/chat', json={
+            'messages': [
+                {
+                    'role': 'user',
+                    'content': chat_request.prompt,
+                }
+            ]
+        }, timeout=10)
+        resp.raise_for_status()  # 如果响应状态码不是200，抛出异常
+        return schemas.ChatResponse(
+            response=resp.json()['choices'][0]['message']['content'],
+            papers=[]
+        )
+    except requests.exceptions.RequestException as e:
+        print(f"Error calling chat service: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Chat service is currently unavailable"
+        )
+
+
+# Paper related endpoints
+@app.post("/api/papers/", response_model=schemas.Paper)
+async def create_paper(
+        current_user: Annotated[schemas.User, Depends(get_current_active_user)],
+        paper: schemas.PaperCreate,
+        db: SessionDep
+):
+    return crud.create_paper(db=db, paper=paper)
+
+
+@app.get("/api/papers/", response_model=schemas.PaperList)
+async def read_papers(
+        current_user: Annotated[schemas.User, Depends(get_current_active_user)],
+        db: SessionDep,
+        skip: int = 0,
+        limit: int = 100
+):
+    papers = crud.get_papers(db, skip=skip, limit=limit)
+    return schemas.PaperList(total=crud.count_papers(db), papers=papers)
+
+
+@app.get("/api/papers/{paper_id}", response_model=schemas.Paper)
+async def read_paper(
+        current_user: Annotated[schemas.User, Depends(get_current_active_user)],
+        paper_id: int,
+        db: SessionDep
+):
+    db_paper = crud.get_paper(db, paper_id=paper_id)
+    if db_paper is None:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    return db_paper
+
+
+@app.get("/api/papers/search/", response_model=schemas.PaperSearchResponse)
+async def search_papers(
+        current_user: Annotated[schemas.User, Depends(get_current_active_user)],
+        query: str,
+        db: SessionDep,
+        limit: int = 10
+):
+    papers = crud.search_papers(db, query=query, limit=limit)
+    return schemas.PaperSearchResponse(papers=papers, search_time=0.0)
+
+
+@app.post("/api/papers/{paper_id}/interact")
+async def record_paper_interaction(
+        current_user: Annotated[schemas.User, Depends(get_current_active_user)],
+        paper_id: int,
+        action_type: str,
+        db: SessionDep
+):
+    db_paper = crud.get_paper(db, paper_id=paper_id)
+    if db_paper is None:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    
+    interaction = schemas.UserPaperInteractionCreate(
+        user_id=current_user.id,
+        paper_id=paper_id,
+        action_type=action_type
+    )
+    crud.record_user_interaction(db=db, interaction=interaction)
+    return {"message": "Interaction recorded"}

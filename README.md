@@ -13,3 +13,10 @@
 除本项目提供的模型API外，不得调用其他外部API
 系统符合分层架构设计要求
 界面使用Vue，业务层和算法层使用FastAPI
+
+# 启动命令
+在git bash运行
+chmod +x start_dev.sh
+./start_dev.sh
+
+前端➜  Local:   http://localhost:5174/

@@ -48,14 +48,24 @@ const submitForm = (formEl: FormInstance | undefined) => {
           username: ruleForm.userName,
           password: ruleForm.password
         })
-        console.log(res)
-        ElMessage.success('登陆成功')
-        userStore.token = res.access_token
-        userStore.userName=ruleForm.userName
-        await router.push({ name: 'IndexMain', params: { userName: ruleForm.userName } });
+        console.log('Login response:', res)
+        if (res && res.access_token) {
+          ElMessage.success('登陆成功')
+          userStore.token = res.access_token
+          userStore.userName = ruleForm.userName
+          try {
+            await router.push({ name: 'IndexMain', params: { userName: ruleForm.userName } })
+          } catch (routerError) {
+            console.error('Router error:', routerError)
+            ElMessage.warning('登录成功，但跳转页面失败')
+          }
+        } else {
+          console.error('Invalid response structure:', res)
+          ElMessage.error('登陆失败：无效的响应格式')
+        }
       } catch (e) {
-        console.log(e)
-        ElMessage.error('登陆失败，请重新输入用户名和密码')
+        console.error('Login error:', e)
+        ElMessage.error('登陆失败，请检查用户名和密码')
       }
     } else {
       ElMessage.error('登陆失败，未输入用户名和密码')

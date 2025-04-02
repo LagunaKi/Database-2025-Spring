@@ -32,3 +32,38 @@ class ConversationResponse(BaseModel):
     system_fingerprint: str
     choices: List[ConversationResponseChoice]
     usage: ConversationResponseUsage
+
+
+# Paper processing models
+class PaperEmbedRequest(BaseModel):
+    paper_id: int
+    title: str
+    abstract: str
+    keywords: List[str]
+
+
+class PaperEmbedResponse(BaseModel):
+    paper_id: int
+    status: str
+    embedding: Optional[List[float]] = None
+
+
+class VectorSearchRequest(BaseModel):
+    query: str
+    limit: int = 10
+
+
+class VectorSearchResponse(BaseModel):
+    results: List[dict]
+    search_time: float
+
+
+class PaperRecommendRequest(BaseModel):
+    user_id: int
+    paper_ids: List[int]
+    limit: int = 10
+
+
+class PaperRecommendResponse(BaseModel):
+    recommendations: List[dict]
+    recommendation_time: float

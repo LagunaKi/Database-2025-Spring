@@ -94,4 +94,4 @@ export const ChatWithLLM = (data: LLMRequest): Promise<LLMResponse> =>
     instance.post(`/api/chat`, data);
 
 export const getPaperDetail = (id: string): Promise<Paper> =>
-    instance.get(`/api/paper/${id}`);
+    instance.get(`/api/papers/${id}`);

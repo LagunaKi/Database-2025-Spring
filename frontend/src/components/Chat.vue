@@ -75,10 +75,9 @@ defineExpose({
           </el-form-item>
         </el-form>
       </div>
-
       <div class="response-box">
         <h3 style="color: white;">回答：</h3>
-        <div class="response-content">{{ chatForm.response }}</div>
+        <div class="response-content" style="color: white;">{{ chatForm.response }}</div>
       </div>
     </div>
 

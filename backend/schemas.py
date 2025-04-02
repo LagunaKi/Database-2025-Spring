@@ -1,6 +1,31 @@
-from typing import List
+from typing import List, Optional
+from datetime import datetime
+from enum import Enum
 
 from pydantic import BaseModel
+
+
+class PaperBase(BaseModel):
+    title: str
+    authors: List[str]
+    abstract: str
+    keywords: List[str]
+    published_date: Optional[datetime]
+    pdf_url: str
+
+
+class PaperCreate(PaperBase):
+    pass
+
+
+class Paper(PaperBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    is_processed: bool
+
+    class Config:
+        from_attributes = True
 
 
 class UserBase(BaseModel):
@@ -33,3 +58,52 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     response: str
+    papers: List[Paper]
+
+
+class PaperList(BaseModel):
+    total: int
+    papers: List[Paper]
+
+
+class PaperList(BaseModel):
+    total: int
+    papers: List[Paper]
+
+
+class PaperSearchRequest(BaseModel):
+    query: str
+    limit: int = 10
+
+
+class PaperSearchResponse(BaseModel):
+    papers: List[Paper]
+    search_time: float
+
+
+class PaperRecommendRequest(BaseModel):
+    user_id: int
+    limit: int = 10
+
+
+class PaperRecommendResponse(BaseModel):
+    papers: List[Paper]
+    recommendation_time: float
+
+
+class UserPaperInteractionBase(BaseModel):
+    user_id: int
+    paper_id: int
+    action_type: str
+
+
+class UserPaperInteractionCreate(UserPaperInteractionBase):
+    pass
+
+
+class UserPaperInteraction(UserPaperInteractionBase):
+    id: int
+    timestamp: datetime
+
+    class Config:
+        from_attributes = True

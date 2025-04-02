@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import or_, func
 
 import models, schemas
 
@@ -38,3 +39,54 @@ def create_user(db: Session, user: schemas.UserCreate):
     db.commit()
     db.refresh(db_user)
     return db_user
+
+
+def create_paper(db: Session, paper: schemas.PaperCreate):
+    db_paper = models.Paper(
+        title=paper.title,
+        authors=paper.authors,
+        abstract=paper.abstract,
+        keywords=paper.keywords,
+        published_date=paper.published_date,
+        pdf_url=paper.pdf_url,
+    )
+    db.add(db_paper)
+    db.commit()
+    db.refresh(db_paper)
+    return db_paper
+
+
+def get_paper(db: Session, paper_id: int):
+    return db.query(models.Paper).filter(models.Paper.id == paper_id).first()
+
+
+def get_papers(db: Session, skip: int = 0, limit: int = 100):
+    return db.query(models.Paper).offset(skip).limit(limit).all()
+
+
+def count_papers(db: Session):
+    return db.query(models.Paper).count()
+
+
+def search_papers(db: Session, query: str, limit: int = 10):
+    # Basic text search, will be enhanced with vector search later
+    search = f"%{query}%"
+    return db.query(models.Paper).filter(
+        or_(
+            models.Paper.title.ilike(search),
+            models.Paper.abstract.ilike(search),
+            func.array_to_string(models.Paper.keywords, ',').ilike(search)
+        )
+    ).limit(limit).all()
+
+
+def record_user_interaction(db: Session, interaction: schemas.UserPaperInteractionCreate):
+    db_interaction = models.UserPaperInteraction(
+        user_id=interaction.user_id,
+        paper_id=interaction.paper_id,
+        action_type=interaction.action_type
+    )
+    db.add(db_interaction)
+    db.commit()
+    db.refresh(db_interaction)
+    return db_interaction
