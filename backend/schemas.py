@@ -9,8 +9,8 @@ class PaperBase(BaseModel):
     title: str
     authors: List[str]
     abstract: str
-    keywords: List[str]
-    published_date: Optional[datetime]
+    keywords: Optional[List[str]] = []
+    published_date: Optional[datetime] = None
     pdf_url: str
 
 
@@ -19,7 +19,7 @@ class PaperCreate(PaperBase):
 
 
 class Paper(PaperBase):
-    id: int
+    id: str
     created_at: datetime
     updated_at: datetime
     is_processed: bool

@@ -16,7 +16,9 @@
 
 # 启动命令
 在git bash运行
+``` bash
 chmod +x start_dev.sh
 ./start_dev.sh
+```
 
-前端➜  Local:   http://localhost:5174/
+前端➜  Local:   http://localhost:5173/

@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jwt.exceptions import InvalidTokenError
@@ -15,6 +15,7 @@ from backend.database import SessionLocal, engine
 from backend.security import verify_password
 
 import requests
+
 
 
 # to get a string like this run:
@@ -40,7 +41,17 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/token")
 
 app = FastAPI()
 
-# 添加CORS中间件
+# 添加基础日志配置
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# 健康检查端点
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+# 确保CORS是第一个中间件
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -50,11 +61,21 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
         "http://127.0.0.1:3333"
-    ],  # 前端开发服务器可能地址
+    ],
     allow_credentials=True,
-    allow_methods=["*"],  # 允许所有方法
-    allow_headers=["*"],  # 允许所有头
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"]  # 暴露所有头部
 )
+
+# 添加调试端点
+@app.get("/api/debug/cors")
+async def debug_cors(request: Request):
+    return {
+        "origin": request.headers.get("origin"),
+        "access-control-request-headers": request.headers.get("access-control-request-headers"),
+        "user-agent": request.headers.get("user-agent")
+    }
 
 
 # Dependency
@@ -190,27 +211,31 @@ async def read_user(
 @app.post("/api/chat", response_model=schemas.ChatResponse)
 async def chat(
         current_user: Annotated[schemas.User, Depends(get_current_active_user)],
-        chat_request: schemas.ChatRequest
+        chat_request: schemas.ChatRequest,
+        db: SessionDep
 ):
     try:
         # 获取大模型回答
-        resp = requests.post('http://localhost:8001/chat', json={
-            'messages': [
-                {
-                    'role': 'user',
-                    'content': chat_request.prompt,
-                }
-            ]
+        resp = requests.post('http://localhost:8001/chat/', json={
+            'messages': [{
+                'role': 'user',
+                'content': chat_request.prompt
+            }]
         }, timeout=10)
         resp.raise_for_status()
         
+        # 解析LLM响应
+        llm_response = resp.json().get('choices', [{}])[0].get('message', {}).get('content', '')
+        
         # 搜索相关论文
-        db = next(get_session())
-        related_papers = crud.search_papers(db, query=chat_request.prompt, limit=5)
+        papers = crud.search_papers(db, query=chat_request.prompt, limit=5)
+        print(f"Found {len(papers)} papers for query: {chat_request.prompt}")  # 调试日志
+        for i, paper in enumerate(papers):
+            print(f"Paper {i+1}: {paper.title}")
         
         return schemas.ChatResponse(
-            response=resp.json()['choices'][0]['message']['content'],
-            papers=related_papers
+            response=llm_response,
+            papers=papers
         )
     except requests.exceptions.RequestException as e:
         print(f"Error calling chat service: {str(e)}")

@@ -23,7 +23,7 @@ class User(Base):
 class Paper(Base):
     __tablename__ = "papers"
 
-    id = Column(Integer, primary_key=True)
+    id = Column(String(50), primary_key=True)  # arXiv IDs are strings like "2107.12345"
     title = Column(String(256), index=True)
     authors = Column(JSON)  # Store as JSON array
     abstract = Column(Text)
@@ -42,7 +42,7 @@ class UserPaperInteraction(Base):
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    paper_id = Column(Integer, ForeignKey("papers.id"))
+    paper_id = Column(String(50), ForeignKey("papers.id"))
     action_type = Column(String(50))  # "view", "download", "favorite", etc.
     timestamp = Column(DateTime, default=datetime.utcnow)
 

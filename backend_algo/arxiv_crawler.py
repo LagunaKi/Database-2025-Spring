@@ -33,6 +33,10 @@ class ArxivPaper:
         summary_elem = entry.find("{http://www.w3.org/2005/Atom}summary")
         self.abstract = summary_elem.text.strip() if summary_elem is not None else "No abstract"
         
+        # Keywords (from arXiv categories)
+        categories = entry.findall("{http://www.w3.org/2005/Atom}category")
+        self.keywords = [cat.attrib["term"] for cat in categories] if categories else []
+        
         # Published date
         published_elem = entry.find("{http://www.w3.org/2005/Atom}published")
         self.published = published_elem.text if published_elem is not None else None
@@ -42,10 +46,10 @@ class ArxivPaper:
             None
         )
 
-def fetch_papers_from_arxiv(search_query: str, max_results: int = 10) -> List[ArxivPaper]:
+def fetch_papers_from_arxiv(search_query: str, max_results: int = 10, start: int = 0) -> List[ArxivPaper]:
     params = {
         "search_query": search_query,
-        "start": 0,
+        "start": start,
         "max_results": max_results,
         "sortBy": "submittedDate",
         "sortOrder": "descending"
@@ -67,6 +71,7 @@ def save_papers_to_db(papers: List[ArxivPaper]):
                     title=paper.title,
                     authors=paper.authors,
                     abstract=paper.abstract,
+                    keywords=paper.keywords,
                     published_date=datetime.strptime(paper.published, "%Y-%m-%dT%H:%M:%SZ"),
                     pdf_url=paper.pdf_url
                 )
@@ -78,9 +83,18 @@ def save_papers_to_db(papers: List[ArxivPaper]):
 def sync_arxiv_papers():
     categories = ["cs.CL", "cs.AI", "cs.LG"]  # NLP, AI, ML categories
     for category in categories:
-        papers = fetch_papers_from_arxiv(f"cat:{category}", max_results=20)
-        save_papers_to_db(papers)
-        time.sleep(3)  # Be polite to arXiv API
+        all_papers = []
+        # Fetch 1000 papers in batches of 100
+        for start in range(0, 1000, 100):
+            papers = fetch_papers_from_arxiv(
+                f"cat:{category}", 
+                max_results=100,
+                start=start
+            )
+            all_papers.extend(papers)
+            time.sleep(5)  # Increased delay to be more polite
+            
+        save_papers_to_db(all_papers)
 
 if __name__ == "__main__":
     sync_arxiv_papers()

@@ -1,5 +1,6 @@
+import re
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, func
+from sqlalchemy import or_, func, String
 
 from . import models, schemas
 from .security import get_password_hash
@@ -68,27 +69,27 @@ def count_papers(db: Session):
 
 
 def search_papers(db: Session, query: str, limit: int = 10):
-    # Hybrid search: text search + vector search (when available)
-    from backend_algo.main import vector_search
-    
-    try:
-        # First try vector search
-        vector_results = vector_search(query, limit)
-        if vector_results:
-            paper_ids = [result["paper_id"] for result in vector_results]
-            return db.query(models.Paper).filter(
-                models.Paper.id.in_(paper_ids)
-            ).all()
-    except:
-        pass
-    
-    # Fallback to text search
-    keywords = query.split()
+    # Temporarily disable vector search for testing
+    # Academic-oriented text search only
     conditions = []
-    for keyword in keywords:
-        search = f"%{keyword}%"
-        conditions.append(models.Paper.title.ilike(search))
-        conditions.append(models.Paper.abstract.ilike(search))
+    
+    # 1. Check for academic category code (e.g. cs.CL)
+    if re.match(r'[a-z]+\.[A-Z]+', query):
+        conditions.append(func.json_contains(models.Paper.keywords, f'"{query}"'))
+    
+    # 2. Handle Chinese and English terms differently
+    terms = []
+    if any('\u4e00' <= char <= '\u9fff' for char in query):  # Check if contains Chinese
+        # For Chinese, search the whole phrase
+        terms.append(query)
+    else:
+        # For English, split into words
+        terms += [term for term in re.split(r'[\s,\-\.;]+', query) if len(term) > 1]
+    
+    # 3. Build search conditions
+    for term in terms:
+        conditions.append(models.Paper.title.ilike(f"%{term}%"))
+        conditions.append(models.Paper.abstract.ilike(f"%{term}%"))
     
     return db.query(models.Paper).filter(
         or_(*conditions)
