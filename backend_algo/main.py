@@ -8,20 +8,24 @@ import chromadb.utils.embedding_functions as embedding_functions
 
 app = FastAPI()
 
-# Initialize ChromaDB client
+# Initialize ChromaDB client with persistent mode
+chroma_client = None
+papers_collection = None
 try:
-    chroma_client = chromadb.HttpClient(host='localhost', port=8002)
-    openai_ef = embedding_functions.OpenAIEmbeddingFunction(
-        api_key="API_KEY_IS_NOT_NEEDED",
-        api_base="http://10.176.64.152:11435/v1",
-        model_name="bge-m3"
+    print("Initializing ChromaDB in persistent mode...")
+    chroma_client = chromadb.PersistentClient(
+        path="chroma_data",
+        settings=chromadb.config.Settings(allow_reset=True)
     )
-    papers_collection = chroma_client.get_or_create_collection(
-        name="papers",
-        embedding_function=openai_ef
-    )
+    
+    # Verify connection
+    print("ChromaDB initialized in persistent mode")
+    
+    # Get or create collection
+    papers_collection = chroma_client.get_or_create_collection("papers")
+    print("Successfully connected to ChromaDB collection")
 except Exception as e:
-    print(f"Failed to initialize ChromaDB client: {e}")
+    print(f"Failed to initialize ChromaDB: {str(e)}")
     papers_collection = None
 
 

@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue';
 import type { FormInstance, FormRules } from 'element-plus';
-import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { ChatWithLLM } from "@/request/api";
+import PaperDetail from './PaperDetail.vue';
 
-const router = useRouter();
 const ruleFormRef = ref<FormInstance>();
 
 const chatForm = reactive({
@@ -17,19 +16,24 @@ interface Paper {
   id: string;
   title: string;
   authors: string[];
+  year?: number;
   abstract: string;
+  pdf_url: string;
   keywords?: string[];
-  pdf_url?: string;
+  published_date?: string;
 }
 
 const papers = ref<Paper[]>([]);
+const showPaperDetail = ref(false);
+const currentPaper = ref<Paper | null>(null);
 
 const viewPaperDetail = (paper: Paper) => {
-  router.push({ name: 'PaperDetail', params: { id: paper.id } }); //跳转到论文详情页面
+  currentPaper.value = paper;
+  showPaperDetail.value = true;
 };
 
 const submitForm = (formEl: FormInstance | undefined) => {
-  if (!formEl) return; //输入为空直接返回
+  if (!formEl) return;
   formEl.validate(async (valid) => {
     if (valid) {
       try {
@@ -38,34 +42,26 @@ const submitForm = (formEl: FormInstance | undefined) => {
         papers.value = res.papers;
       } catch (e) {
         console.log(e);
+        ElMessage.error('获取论文信息失败');
       }
-    } else {
-      return false;
     }
   });
 };
-
-//暴露给外部
-defineExpose({
-  papers,
-  viewPaperDetail,
-});
 </script>
 
 <template>
   <div class="chat-container">
     <div class="main-content">
       <div class="input-container">
-          <el-form
+        <el-form
           ref="ruleFormRef"
           :model="chatForm"
           label-width="0"
           class="demo-ruleForm"
           style="width: 100%"
-          >
-          
+        >
           <h3 style="color: white;">提问：</h3>
-          <el-form-item  prop="prompt" class="inline-form-item">
+          <el-form-item prop="prompt" class="inline-form-item">
             <el-input 
               v-model="chatForm.prompt" 
               type="text" 
@@ -73,7 +69,12 @@ defineExpose({
               placeholder="输入你想要搜索并总结的论文"
               style="padding-right: 70px;"
             />
-            <el-button style="background-color: burlywood; color: white; position: absolute; right: 0; top: 50%; transform: translateY(-50%);" @click="submitForm(ruleFormRef)">搜索</el-button>
+            <el-button 
+              style="background-color: burlywood; color: white; position: absolute; right: 0; top: 50%; transform: translateY(-50%);" 
+              @click="submitForm(ruleFormRef)"
+            >
+              搜索
+            </el-button>
           </el-form-item>
         </el-form>
       </div>
@@ -93,24 +94,24 @@ defineExpose({
               {{ row.authors.join(', ') }}
             </template>
           </el-table-column>
-          <el-table-column label="摘要" show-overflow-tooltip>
-            <template #default="{row}">
-              {{ row.abstract.substring(0, 30) }}...
-            </template>
-          </el-table-column>
           <el-table-column label="操作" width="120">
             <template #default="scope">
-              <el-button type="primary" @click="viewPaperDetail(scope.row)">查看详情</el-button>
+              <el-button type="primary" @click="viewPaperDetail(scope.row)">详情</el-button>
             </template>
           </el-table-column>
         </el-table>
       </div>
     </div>
+
+    <PaperDetail 
+      :visible="showPaperDetail" 
+      :paperData="currentPaper"
+      @update:visible="val => showPaperDetail = val"
+    />
   </div>
 </template>
 
 <style scoped>
-
 .chat-container {
   display: flex;
   gap: 20px;

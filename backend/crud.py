@@ -57,6 +57,7 @@ def create_paper(db: Session, paper: schemas.PaperCreate):
 
 
 def get_paper(db: Session, paper_id: str):
+    # Use original paper_id for query (database stores full ID with version)
     return db.query(models.Paper).filter(models.Paper.id == paper_id).first()
 
 

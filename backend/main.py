@@ -53,13 +53,40 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/token")
 
 app = FastAPI()
 
-# 添加详细的日志配置
+# 配置详细日志输出到控制台和文件
 import logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+from logging.handlers import RotatingFileHandler
+
+# 创建logger
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# 控制台handler
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.DEBUG)
+
+# 文件handler (最大10MB，保留3个备份)
+file_handler = RotatingFileHandler(
+    'backend.log', 
+    maxBytes=10*1024*1024,
+    backupCount=3,
+    encoding='utf-8'
+)
+file_handler.setLevel(logging.DEBUG)
+
+# 日志格式
+formatter = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+console_handler.setFormatter(formatter)
+file_handler.setFormatter(formatter)
+
+# 添加handlers
+logger.addHandler(console_handler)
+logger.addHandler(file_handler)
+
+# 测试日志输出
+logger.info("Logger initialized successfully")
 
 # 添加请求日志中间件
 @app.middleware("http")
@@ -77,7 +104,26 @@ async def log_requests(request: Request, call_next):
 # 健康检查端点
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+    return {
+        "status": "ok", 
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "port": 8000,
+        "listening": True
+    }
+
+# 连通性测试端点
+@app.get("/api/test/echo")
+async def echo_test(
+    request: Request,
+    text: str = "test"
+):
+    logger.info(f"Echo test request from {request.client.host}")
+    return {
+        "echo": text,
+        "headers": dict(request.headers),
+        "client": str(request.client),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
 
 # 确保CORS是第一个中间件
 app.add_middleware(
@@ -145,12 +191,16 @@ async def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
+        logger.debug(f"Validating token: {token[:10]}...")
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
+            logger.warning("Token validation failed: username not found in payload")
             raise credentials_exception
         token_data = TokenData(username=username)
-    except InvalidTokenError:
+        logger.debug(f"Token validated for user: {username}")
+    except InvalidTokenError as e:
+        logger.error(f"Token validation failed: {str(e)}")
         raise credentials_exception
     user = crud.get_user_by_username(db, username=token_data.username)
     if user is None:
@@ -294,51 +344,59 @@ async def read_papers(
     return schemas.PaperList(total=crud.count_papers(db), papers=papers)
 
 
-@app.get("/api/papers/{paper_id}", response_model=PaperDetailResponse)
+@app.get("/api/papers/{paper_id:path}", response_model=PaperDetailResponse)
 async def read_paper(
         current_user: Annotated[schemas.User, Depends(get_current_active_user)],
         paper_id: str,
-        db: SessionDep
+        db: SessionDep,
+        request: Request
 ):
-    logger.info(f"Received request for paper_id: {paper_id}")
+    logger.info(f"Paper detail request received - ID: {paper_id}")
+    logger.info(f"Request headers: {dict(request.headers)}")
+    logger.info(f"Request URL: {request.url}")
     
     try:
-        # Validate paper_id format (arXiv ID pattern)
-        if not re.match(r'^\d{4}\.\d{4,5}(v\d+)?$', paper_id):
-            logger.warning(f"Invalid paper_id format: {paper_id}")
+        # 规范化paper_id
+        paper_id = paper_id.strip()
+        if not paper_id:
             raise HTTPException(
                 status_code=422,
-                detail="Invalid paper_id format. Expected arXiv ID format like '1234.56789' or '1234.56789v1'"
+                detail="Paper ID cannot be empty"
             )
-        
+
+        # 尝试获取论文
         db_paper = crud.get_paper(db, paper_id=paper_id)
-        if db_paper is None:
+        if not db_paper:
             logger.warning(f"Paper not found: {paper_id}")
             raise HTTPException(
                 status_code=404,
-                detail=f"Paper with ID '{paper_id}' not found in database. It may have been removed or never existed."
+                detail=f"Paper with ID '{paper_id}' not found"
             )
-        
-        # Extract year from published_date if available
-        year = db_paper.published_date.year if db_paper.published_date else None
-        
+
+        # 验证并准备响应数据
         response_data = {
             "id": str(db_paper.id),
-            "title": db_paper.title,
-            "authors": db_paper.authors,
-            "abstract": db_paper.abstract,
-            "pdf_url": db_paper.pdf_url,
-            "keywords": db_paper.keywords,
+            "title": str(db_paper.title) if db_paper.title else "",
+            "authors": list(db_paper.authors) if db_paper.authors else [],
+            "abstract": str(db_paper.abstract) if db_paper.abstract else "",
+            "pdf_url": str(db_paper.pdf_url) if db_paper.pdf_url else "",
+            "keywords": list(db_paper.keywords) if db_paper.keywords else [],
             "published_date": db_paper.published_date.isoformat() if db_paper.published_date else None,
-            "year": year
+            "year": db_paper.published_date.year if db_paper.published_date else None
         }
+
+        logger.debug(f"Prepared response data: {response_data}")
+        return response_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing paper detail request: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=422,
+            detail=f"Error processing paper details: {str(e)}"
+        )
         
-        # 验证数据是否符合模型
-        try:
-            PaperDetailResponse(**response_data)
-        except Exception as e:
-            logger.error(f"数据验证失败: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"数据验证失败: {str(e)}")
         
         logger.info(f"Successfully retrieved paper: {paper_id}")
         return response_data
@@ -346,10 +404,10 @@ async def read_paper(
     except HTTPException:
         raise  # Re-raise HTTP exceptions
     except Exception as e:
-        logger.error(f"获取论文详情时出错: {str(e)}", exc_info=True)
+        logger.error(f"Error processing paper detail request: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=500,
-            detail=f"Internal server error: {str(e)}"
+            status_code=422,
+            detail=f"Error processing paper details: {str(e)}"
         )
 
 
@@ -398,6 +456,12 @@ async def debug_papers(db: SessionDep):
             } for paper in papers
         ]
     }
+
+# 调试接口 - 测试论文请求
+@app.get("/api/debug/paper/{paper_id:path}")
+async def debug_paper_request(paper_id: str):
+    print(f"DEBUG - Received paper_id: {paper_id}")  # 确保输出到控制台
+    return {"paper_id": paper_id, "status": "received"}
 
 # 调试接口 - 添加测试论文数据
 @app.post("/test/papers")
