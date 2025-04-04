@@ -96,6 +96,12 @@ def batch_process_papers(batch_size: int = 10):
             time.sleep(1)  # Avoid rate limiting
             
     finally:
+        # 输出chromadb中的论文总数
+        try:
+            total_papers = papers_collection.count()
+            print(f"\nTotal papers in chromadb: {total_papers}")
+        except Exception as e:
+            print(f"\nError getting paper count: {str(e)}")
         db.close()
 
 if __name__ == "__main__":

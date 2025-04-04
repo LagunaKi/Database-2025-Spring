@@ -56,7 +56,7 @@ def create_paper(db: Session, paper: schemas.PaperCreate):
     return db_paper
 
 
-def get_paper(db: Session, paper_id: int):
+def get_paper(db: Session, paper_id: str):
     return db.query(models.Paper).filter(models.Paper.id == paper_id).first()
 
 
@@ -89,14 +89,26 @@ def search_papers(db: Session, query: str, limit: int = 10):
         # Perform vector search
         results = collection.query(
             query_texts=[query],
-            n_results=limit
+            n_results=limit * 2  # Get more results to account for possible missing papers
         )
         
         # Get paper IDs from results
         paper_ids = results['ids'][0]
-        return db.query(models.Paper).filter(
-            models.Paper.id.in_(paper_ids)
-        ).all()
+        
+        # Verify each paper exists in database
+        existing_papers = []
+        for pid in paper_ids:
+            paper = db.query(models.Paper).filter(models.Paper.id == pid).first()
+            if paper:
+                existing_papers.append(paper)
+            else:
+                print(f"Warning: Paper {pid} found in vector DB but not in main database")
+        
+        # Log search results
+        print(f"Vector search returned {len(paper_ids)} papers, found {len(existing_papers)} valid papers in database")
+        
+        # Return up to limit papers
+        return existing_papers[:limit] if len(existing_papers) > 0 else []
     
     except Exception as e:
         print(f"Vector search failed, falling back to text search: {e}")

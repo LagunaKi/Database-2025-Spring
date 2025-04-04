@@ -2,6 +2,8 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getPaperDetail } from '@/request/api'
+import { Loading, Warning } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 
 interface Paper {
   id: string;
@@ -17,14 +19,23 @@ interface Paper {
 const route = useRoute()
 const router = useRouter()
 const paper = ref<Paper | null>(null)
+const error = ref<string | null>(null)
 
 onMounted(async () => {
   const paperId = route.params.id as string
   try {
     const res = await getPaperDetail(paperId)
     paper.value = res
-  } catch (e) {
-    console.error(e)
+    error.value = null
+  } catch (e: any) {
+    if (e.response?.status === 404) {
+      error.value = `论文 ${paperId} 不存在，可能已被删除或从未收录`
+      ElMessage.error(error.value)
+    } else {
+      error.value = '加载论文详情时出错，请稍后重试'
+      ElMessage.error(error.value)
+    }
+    console.error('加载论文详情出错:', e)
   }
 })
 

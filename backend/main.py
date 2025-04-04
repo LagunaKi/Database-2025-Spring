@@ -1,8 +1,20 @@
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
-
+from typing import Annotated, List, Optional
+import re
 import jwt
 from fastapi import Depends, FastAPI, HTTPException, status, Request
+from pydantic import BaseModel
+
+
+class PaperDetailResponse(BaseModel):
+    id: str
+    title: str
+    authors: List[str]
+    abstract: str
+    pdf_url: str
+    keywords: Optional[List[str]] = None
+    published_date: Optional[str] = None
+    year: Optional[int] = None
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jwt.exceptions import InvalidTokenError
@@ -41,10 +53,26 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/token")
 
 app = FastAPI()
 
-# 添加基础日志配置
+# 添加详细的日志配置
 import logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+# 添加请求日志中间件
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    logger.debug(f"收到请求: {request.method} {request.url}")
+    logger.debug(f"请求头: {dict(request.headers)}")
+    try:
+        response = await call_next(request)
+        logger.debug(f"请求处理完成: {request.method} {request.url} 状态码: {response.status_code}")
+        return response
+    except Exception as e:
+        logger.error(f"请求处理出错: {str(e)}")
+        raise
 
 # 健康检查端点
 @app.get("/health")
@@ -266,16 +294,63 @@ async def read_papers(
     return schemas.PaperList(total=crud.count_papers(db), papers=papers)
 
 
-@app.get("/api/papers/{paper_id}", response_model=schemas.Paper)
+@app.get("/api/papers/{paper_id}", response_model=PaperDetailResponse)
 async def read_paper(
         current_user: Annotated[schemas.User, Depends(get_current_active_user)],
-        paper_id: int,
+        paper_id: str,
         db: SessionDep
 ):
-    db_paper = crud.get_paper(db, paper_id=paper_id)
-    if db_paper is None:
-        raise HTTPException(status_code=404, detail="Paper not found")
-    return db_paper
+    logger.info(f"Received request for paper_id: {paper_id}")
+    
+    try:
+        # Validate paper_id format (arXiv ID pattern)
+        if not re.match(r'^\d{4}\.\d{4,5}(v\d+)?$', paper_id):
+            logger.warning(f"Invalid paper_id format: {paper_id}")
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid paper_id format. Expected arXiv ID format like '1234.56789' or '1234.56789v1'"
+            )
+        
+        db_paper = crud.get_paper(db, paper_id=paper_id)
+        if db_paper is None:
+            logger.warning(f"Paper not found: {paper_id}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Paper with ID '{paper_id}' not found in database. It may have been removed or never existed."
+            )
+        
+        # Extract year from published_date if available
+        year = db_paper.published_date.year if db_paper.published_date else None
+        
+        response_data = {
+            "id": str(db_paper.id),
+            "title": db_paper.title,
+            "authors": db_paper.authors,
+            "abstract": db_paper.abstract,
+            "pdf_url": db_paper.pdf_url,
+            "keywords": db_paper.keywords,
+            "published_date": db_paper.published_date.isoformat() if db_paper.published_date else None,
+            "year": year
+        }
+        
+        # 验证数据是否符合模型
+        try:
+            PaperDetailResponse(**response_data)
+        except Exception as e:
+            logger.error(f"数据验证失败: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"数据验证失败: {str(e)}")
+        
+        logger.info(f"Successfully retrieved paper: {paper_id}")
+        return response_data
+        
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
+    except Exception as e:
+        logger.error(f"获取论文详情时出错: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
 
 
 @app.get("/api/papers/search/", response_model=schemas.PaperSearchResponse)

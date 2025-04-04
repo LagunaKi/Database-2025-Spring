@@ -14,7 +14,7 @@ const chatForm = reactive({
 });
 
 interface Paper {
-  id: number;
+  id: string;
   title: string;
   authors: string[];
   abstract: string;
@@ -56,11 +56,12 @@ defineExpose({
   <div class="chat-container">
     <div class="main-content">
       <div class="input-container">
-        <el-form
+          <el-form
           ref="ruleFormRef"
           :model="chatForm"
-          label-width="auto"
+          label-width="0"
           class="demo-ruleForm"
+          style="width: 100%"
           >
           
           <h3 style="color: white;">提问：</h3>

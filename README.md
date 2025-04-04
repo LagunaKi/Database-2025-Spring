@@ -22,3 +22,14 @@ chmod +x start_dev.sh
 ```
 
 前端➜  Local:   http://localhost:5173/
+
+## 更新数据库
+处理论文向量并存储到ChromaDB：
+``` bash
+python backend_algo/batch_embed.py
+```
+
+爬取论文：
+``` bash
+python backend_algo/arxiv_crawler.py
+```

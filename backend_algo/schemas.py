@@ -36,14 +36,14 @@ class ConversationResponse(BaseModel):
 
 # Paper processing models
 class PaperEmbedRequest(BaseModel):
-    paper_id: int
+    paper_id: str
     title: str
     abstract: str
     keywords: List[str]
 
 
 class PaperEmbedResponse(BaseModel):
-    paper_id: int
+    paper_id: str
     status: str
     embedding: Optional[List[float]] = None
 
@@ -60,7 +60,7 @@ class VectorSearchResponse(BaseModel):
 
 class PaperRecommendRequest(BaseModel):
     user_id: int
-    paper_ids: List[int]
+    paper_ids: List[str]
     limit: int = 10
 
 
