@@ -91,6 +91,19 @@ class PaperRecommendResponse(BaseModel):
     recommendation_time: float
 
 
+class PaperEmbedRequest(BaseModel):
+    paper_id: str
+    title: str
+    abstract: str
+    keywords: List[str]
+
+
+class PaperEmbedResponse(BaseModel):
+    paper_id: str
+    status: str
+    embedding: Optional[List[float]] = None
+
+
 class UserPaperInteractionBase(BaseModel):
     user_id: int
     paper_id: int

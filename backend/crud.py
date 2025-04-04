@@ -69,8 +69,39 @@ def count_papers(db: Session):
 
 
 def search_papers(db: Session, query: str, limit: int = 10):
-    # Temporarily disable vector search for testing
-    # Academic-oriented text search only
+    try:
+        # First try vector search using ChromaDB client
+        import chromadb
+        from chromadb.utils import embedding_functions
+        
+        # Initialize ChromaDB client
+        chroma_client = chromadb.HttpClient(host='localhost', port=8002)
+        openai_ef = embedding_functions.OpenAIEmbeddingFunction(
+            api_key="API_KEY_IS_NOT_NEEDED",
+            api_base="http://10.176.64.152:11435/v1",
+            model_name="bge-m3"
+        )
+        collection = chroma_client.get_collection(
+            name="papers",
+            embedding_function=openai_ef
+        )
+        
+        # Perform vector search
+        results = collection.query(
+            query_texts=[query],
+            n_results=limit
+        )
+        
+        # Get paper IDs from results
+        paper_ids = results['ids'][0]
+        return db.query(models.Paper).filter(
+            models.Paper.id.in_(paper_ids)
+        ).all()
+    
+    except Exception as e:
+        print(f"Vector search failed, falling back to text search: {e}")
+    
+    # Fallback to text search if vector search fails
     conditions = []
     
     # 1. Check for academic category code (e.g. cs.CL)

@@ -10,30 +10,28 @@ openai_ef = embedding_functions.OpenAIEmbeddingFunction(
 # 注意：需要先启动向量数据库，参考README.md
 client = chromadb.HttpClient(host='localhost', port=8002)
 
-# 创建collection，指定embedding_function
-collection = client.create_collection(name="my_collection", embedding_function=openai_ef)
+# 获取已存在的papers collection
+collection = client.get_collection(name="papers", embedding_function=openai_ef)
 
-# 插入数据
-collection.add(ids=[
-    "id0",
-    "id1",
-    "id2",
-], documents=[
-    "The capital of Brazil is Brasilia.",
-    "The capital of France is Paris.",
-    "Horses and cows are both animals",
-])
+# 验证集合中的论文数量
+print(f"Papers in collection: {collection.count()}")
 
-# 这句这里是可以不写的，这里写是提醒get_collection时同样需要指定embedding_function
-collection = client.get_collection(name="my_collection", embedding_function=openai_ef)
-
-print(collection.get('id0'))
-print(collection.get('id3'))
-
-print(collection.query(query_texts=[
-    "What is the capital of France?",
-    "What is the capital of Brazil?",
-], n_results=2))  # 向量检索，批量的，可以输入多个query，对每个query检索n_results个结果
+# 查询示例
+if collection.count() > 0:
+    # 获取第一个论文的ID
+    first_paper = collection.get(limit=1)
+    if first_paper['ids']:
+        paper_id = first_paper['ids'][0]
+        print(f"\nFirst paper details (ID: {paper_id}):")
+        print(collection.get(ids=[paper_id]))
+        
+        # 示例向量搜索
+        print("\nRunning sample vector search:")
+        results = collection.query(
+            query_texts=["machine learning"],
+            n_results=3
+        )
+        print(f"Found {len(results['ids'][0])} relevant papers")
 
 # 其他操作请参考文档：
 # https://docs.trychroma.com/docs/overview/introduction
