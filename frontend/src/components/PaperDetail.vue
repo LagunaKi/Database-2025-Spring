@@ -120,7 +120,7 @@ watch(() => props.paperData, (newVal) => {
         </div>
         <div v-else-if="recommendations.length > 0" class="recommendation-list">
           <div v-for="paper in recommendations" :key="paper.id" class="recommendation-item">
-            <h4 @click="emit('update:visible', false); $emit('show-paper', paper.id)">
+            <h4 @click="emit('show-paper', paper)">
               {{ paper.title }}
             </h4>
             <p>{{ paper.authors.join(', ') }}</p>

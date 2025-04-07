@@ -107,6 +107,7 @@ const submitForm = (formEl: FormInstance | undefined) => {
       :visible="showPaperDetail" 
       :paperData="currentPaper"
       @update:visible="val => showPaperDetail = val"
+      @show-paper="viewPaperDetail"
     />
   </div>
 </template>
