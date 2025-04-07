@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, List, Optional
 import re
 import jwt
-from fastapi import Depends, FastAPI, HTTPException, status, Request
+from fastapi import Depends, FastAPI, HTTPException, status, Request, Query
 from pydantic import BaseModel
 
 
@@ -351,9 +351,9 @@ async def read_paper(
         db: SessionDep,
         request: Request
 ):
-    logger.info(f"Paper detail request received - ID: {paper_id}")
-    logger.info(f"Request headers: {dict(request.headers)}")
-    logger.info(f"Request URL: {request.url}")
+    logger.info(f"Paper detail request - User: {current_user.id}, Paper: {paper_id}")
+    logger.debug(f"Request headers: {dict(request.headers)}")
+    logger.debug(f"Request URL: {request.url}")
     
     try:
         # 规范化paper_id
@@ -419,27 +419,263 @@ async def search_papers(
         limit: int = 10
 ):
     papers = crud.search_papers(db, query=query, limit=limit)
+    
+    # Record searched papers in user_paper_interactions
+    for paper in papers:
+        interaction = schemas.UserPaperInteractionCreate(
+            user_id=current_user.id,
+            paper_id=paper.id,
+            action_type="search"
+        )
+        crud.record_user_interaction(db=db, interaction=interaction)
+    
+    db.commit()
     return schemas.PaperSearchResponse(papers=papers, search_time=0.0)
+
+
+async def _handle_recommendation(
+    current_user: schemas.User,
+    db: Session,
+    paper_id: str,
+    source: str
+) -> PaperDetailResponse:
+    """Shared recommendation logic"""
+    logger.info(f"Recommendation request - User: {current_user.id}, Paper: {paper_id} (from {source})")
+    
+    try:
+        # Verify current paper exists
+        current_paper = crud.get_paper(db, paper_id=paper_id)
+        if not current_paper:
+            logger.warning(f"Paper not found: {paper_id}")
+            raise HTTPException(status_code=404, detail=f"Paper not found: {paper_id}")
+        
+        # Get user's recently viewed papers
+        viewed_papers = crud.get_user_interactions(
+            db, 
+            user_id=current_user.id,
+            action_type="view",
+            limit=5
+        )
+        viewed_papers = [p for p in viewed_papers if p.id != paper_id]
+        
+        if not viewed_papers:
+            logger.info("No user history, using random recommendation")
+            return await _get_random_recommendation(current_user, db, paper_id)
+        
+        # Build search query from viewed papers
+        search_terms = []
+        for paper in viewed_papers:
+            if paper.keywords:
+                search_terms.extend(paper.keywords)
+            if paper.title:
+                search_terms.append(paper.title.split()[0])
+        
+        if not search_terms:
+            logger.info("No keywords, using random recommendation")
+            return await _get_random_recommendation(current_user, db, paper_id)
+        
+        # Get most frequent terms
+        from collections import Counter
+        query = " ".join([term for term, _ in Counter(search_terms).most_common(3)])
+        
+        # Find similar papers
+        candidate_papers = crud.search_papers(db, query=query, limit=10)
+        candidate_papers = [p for p in candidate_papers if p.id != paper_id]
+        
+        if not candidate_papers:
+            logger.info("No similar papers, using random recommendation")
+            return await _get_random_recommendation(current_user, db, paper_id)
+        
+        # Return top candidate
+        recommended_paper = candidate_papers[0]
+        logger.info(f"Recommended paper: {recommended_paper.id}")
+        
+        return await read_paper(
+            current_user=current_user,
+            paper_id=recommended_paper.id,
+            db=db,
+            request=Request(scope={"type": "http"})
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Recommendation error: {str(e)}")
+        return await _get_random_recommendation(current_user, db, paper_id)
+
+@app.get("/api/recommendations/{paper_id}")
+async def get_recommendation(
+    request: Request,
+    current_user: Annotated[schemas.User, Depends(get_current_active_user)],
+    db: SessionDep,
+    paper_id: str
+) -> PaperDetailResponse:
+    """Get paper recommendations based on user history"""
+    logger.debug(f"Recommendation request for paper: {paper_id}")
+    
+    # Verify paper exists
+    paper = crud.get_paper(db, paper_id=paper_id)
+    if not paper:
+        logger.warning(f"Paper not found: {paper_id}")
+        raise HTTPException(status_code=404, detail="Paper not found")
+    
+    # Get user's recently viewed papers (last 5)
+    viewed_papers = crud.get_user_interactions(
+        db, 
+        user_id=current_user.id,
+        action_type="view",
+        limit=5
+    )
+    
+    # Filter out current paper and get keywords
+    keywords = set()
+    for p in viewed_papers:
+        if p.id != paper_id and p.keywords:
+            keywords.update(p.keywords)
+    
+    if not keywords:
+        # Fallback to random recommendation if no history
+        papers = db.query(models.Paper).filter(models.Paper.id != paper_id).all()
+        if not papers:
+            raise HTTPException(status_code=404, detail="No papers available")
+        recommended = random.choice(papers)
+    else:
+        # Find papers with matching keywords
+        query = " ".join(keywords)
+        candidates = crud.search_papers(db, query=query, limit=10)
+        candidates = [p for p in candidates if p.id != paper_id]
+        recommended = candidates[0] if candidates else None
+    
+    if not recommended:
+        raise HTTPException(status_code=404, detail="No recommendations available")
+    
+    return await read_paper(
+        current_user=current_user,
+        paper_id=recommended.id,
+        db=db,
+        request=request
+    )
+    """Get personalized recommendation based on user history and current paper"""
+    logger.info(f"Recommendation request - User: {current_user.id}, Paper: {paper_id}")
+    logger.debug(f"Full request URL: {Request.url}")
+    
+    try:
+        # Verify current paper exists with actual paper_id
+        logger.debug(f"Querying paper with ID: {paper_id}")
+        current_paper = crud.get_paper(db, paper_id=paper_id)
+        if not current_paper:
+            logger.warning(f"Paper not found: {paper_id}")
+            raise HTTPException(status_code=404, detail=f"Paper not found: {paper_id}")
+        
+        # Get user's recently viewed papers (excluding current paper)
+        viewed_papers = crud.get_user_interactions(
+            db, 
+            user_id=current_user.id,
+            action_type="view",
+            limit=5
+        )
+        viewed_papers = [p for p in viewed_papers if p.id != paper_id]
+        
+        if not viewed_papers:
+            logger.info("No user history available, falling back to random recommendation")
+            return await _get_random_recommendation(current_user, db, paper_id)
+        
+        # Build search query from viewed papers' keywords
+        search_terms = []
+        for paper in viewed_papers:
+            if paper.keywords:
+                search_terms.extend(paper.keywords)
+            if paper.title:
+                search_terms.append(paper.title.split()[0])  # Add first word of title
+        
+        if not search_terms:
+            logger.info("No keywords available, falling back to random recommendation")
+            return await _get_random_recommendation(current_user, db, paper_id)
+        
+        # Use most frequent 3 terms as query
+        from collections import Counter
+        query = " ".join([term for term, _ in Counter(search_terms).most_common(3)])
+        logger.debug(f"Generated search query from user history: {query}")
+        
+        # Search for similar papers (excluding current paper)
+        candidate_papers = crud.search_papers(db, query=query, limit=10)
+        candidate_papers = [p for p in candidate_papers if p.id != paper_id]
+        
+        if not candidate_papers:
+            logger.info("No similar papers found, falling back to random recommendation")
+            return await _get_random_recommendation(current_user, db, paper_id)
+        
+        # Select top candidate
+        recommended_paper = candidate_papers[0]
+        logger.info(f"Recommended paper: {recommended_paper.id} ({recommended_paper.title})")
+        
+        return await read_paper(
+            current_user=current_user,
+            paper_id=recommended_paper.id,
+            db=db,
+            request=Request(scope={"type": "http"})
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Recommendation error: {str(e)}", exc_info=True)
+        # Fallback to random recommendation on error
+        return await _get_random_recommendation(current_user, db, paper_id)
+
+
+async def _get_random_recommendation(
+    current_user: schemas.User,
+    db: Session,
+    exclude_paper_id: str
+) -> PaperDetailResponse:
+    """Fallback random recommendation"""
+    all_papers = db.query(models.Paper)\
+        .filter(models.Paper.id != exclude_paper_id)\
+        .all()
+    
+    if not all_papers:
+        raise HTTPException(
+            status_code=404,
+            detail="No papers available for recommendation"
+        )
+    
+    import random
+    recommended_paper = random.choice(all_papers)
+    logger.info(f"Randomly recommended paper: {recommended_paper.id}")
+    
+    return await read_paper(
+        current_user=current_user,
+        paper_id=recommended_paper.id,
+        db=db,
+        request=Request(scope={"type": "http"})
+    )
 
 
 @app.post("/api/papers/{paper_id}/interact")
 async def record_paper_interaction(
     current_user: Annotated[schemas.User, Depends(get_current_active_user)],
-    paper_id: int,
-    action_type: str,
-    db: SessionDep
+    paper_id: str,
+    db: SessionDep,
+    action_type: str = "view"
 ):
-    db_paper = crud.get_paper(db, paper_id=paper_id)
-    if db_paper is None:
-        raise HTTPException(status_code=404, detail="Paper not found")
+    """Simplified interaction recording endpoint"""
+    logger.info(f"Recording interaction for user {current_user.id} on paper {paper_id}")
     
     interaction = schemas.UserPaperInteractionCreate(
         user_id=current_user.id,
         paper_id=paper_id,
         action_type=action_type
     )
-    crud.record_user_interaction(db=db, interaction=interaction)
-    return {"message": "Interaction recorded"}
+    
+    try:
+        crud.record_user_interaction(db=db, interaction=interaction)
+        db.commit()
+        return {"status": "success", "message": "Interaction recorded"}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error recording interaction: {str(e)}")
+        return {"status": "error", "message": "Failed to record interaction"}
 
 # 调试接口 - 获取所有论文数据
 @app.get("/test/papers")

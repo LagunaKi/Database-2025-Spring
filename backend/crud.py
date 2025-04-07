@@ -58,7 +58,14 @@ def create_paper(db: Session, paper: schemas.PaperCreate):
 
 def get_paper(db: Session, paper_id: str):
     # Use original paper_id for query (database stores full ID with version)
-    return db.query(models.Paper).filter(models.Paper.id == paper_id).first()
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.debug(f"Querying paper with ID: {paper_id}")
+    logger.debug(f"Query SQL: {str(db.query(models.Paper).filter(models.Paper.id == paper_id))}")
+    
+    paper = db.query(models.Paper).filter(models.Paper.id == paper_id).first()
+    logger.debug(f"Query result: {'Found' if paper else 'Not found'}")
+    return paper
 
 
 def get_papers(db: Session, skip: int = 0, limit: int = 100):
@@ -150,3 +157,31 @@ def record_user_interaction(db: Session, interaction: schemas.UserPaperInteracti
     db.commit()
     db.refresh(db_interaction)
     return db_interaction
+
+
+def get_user_interactions(
+    db: Session, 
+    user_id: int, 
+    action_type: str = "view",
+    limit: int = 5
+) -> list[models.Paper]:
+    """Get papers that user recently interacted with"""
+    interactions = db.query(models.UserPaperInteraction)\
+        .filter(
+            models.UserPaperInteraction.user_id == user_id,
+            models.UserPaperInteraction.action_type == action_type
+        )\
+        .order_by(models.UserPaperInteraction.timestamp.desc())\
+        .limit(limit)\
+        .all()
+    
+    # Get the actual paper objects
+    papers = []
+    for interaction in interactions:
+        paper = db.query(models.Paper)\
+            .filter(models.Paper.id == interaction.paper_id)\
+            .first()
+        if paper:
+            papers.append(paper)
+    
+    return papers

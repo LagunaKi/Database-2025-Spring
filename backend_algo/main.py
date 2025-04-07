@@ -37,10 +37,20 @@ MODEL = 'qwen2.5:7b'
 async def chat_stream(conversation: schemas.Conversation):
 
     def generator():
+        # Add prompt prefix to user messages
+        processed_messages = []
+        for msg in conversation.messages:
+            if msg.role == 'user':
+                processed_msg = msg.model_dump()
+                processed_msg['content'] = f"你是一个论文搜索系统的ai工具，下面是对你的提问：{msg.content}"
+                processed_messages.append(processed_msg)
+            else:
+                processed_messages.append(msg.model_dump())
+                
         with requests.post(f'{URL}/chat/completions', json={
             'model': MODEL,
             'stream': True,
-            'messages': [m.model_dump() for m in conversation.messages],
+            'messages': processed_messages,
         }, stream=True, timeout=60) as resp:
             for raw_line in resp.iter_lines():
                 line = raw_line.decode('utf-8').strip()
@@ -62,10 +72,20 @@ async def chat_stream(conversation: schemas.Conversation):
 
 @app.post("/chat/", response_model=schemas.ConversationResponse)
 async def chat(conversation: schemas.Conversation):
+    # Add prompt prefix to user messages
+    processed_messages = []
+    for msg in conversation.messages:
+        if msg.role == 'user':
+            processed_msg = msg.model_dump()
+            processed_msg['content'] = f"你是一个论文搜索系统的ai工具，下面是对你的提问：{msg.content}"
+            processed_messages.append(processed_msg)
+        else:
+            processed_messages.append(msg.model_dump())
+            
     resp = requests.post(f'{URL}/chat/completions', json={
         'model': MODEL,
         'stream': False,
-        'messages': [m.model_dump() for m in conversation.messages],
+        'messages': processed_messages,
     }, stream=False, timeout=60)
     return resp.json()
 
@@ -161,50 +181,96 @@ async def recommend_papers(request: schemas.PaperRecommendRequest):
         )
     
     try:
+        print(f"Recommendation request received for papers: {request.paper_ids}")
+        
         # Get user's interacted papers
         if not request.paper_ids:
-            # If no interaction history, return popular papers
-            results = papers_collection.query(
-                query_texts=[""],
-                n_results=request.limit,
-                include=["metadatas"]
-            )
+            print("No paper IDs provided, returning random papers")
+            all_papers = papers_collection.get()
+            print(f"Total papers in DB: {len(all_papers['ids'])}")
+            
+            if not all_papers["ids"]:
+                raise HTTPException(
+                    status_code=404,
+                    detail="No papers available in database"
+                )
+                
+            # Get random papers
+            import random
+            random_ids = random.sample(all_papers["ids"], min(request.limit, len(all_papers["ids"])))
+            print(f"Selected random paper IDs: {random_ids}")
+            results = papers_collection.get(ids=random_ids)
         else:
+            print(f"Looking for embeddings for papers: {request.paper_ids}")
             # Get embeddings for user's interacted papers
             interacted_papers = papers_collection.get(
                 ids=[str(pid) for pid in request.paper_ids],
                 include=["embeddings"]
             )
+            print(f"Found interacted papers: {interacted_papers}")
             
             if not interacted_papers["embeddings"]:
-                # Fallback to popular papers if no embeddings found
-                results = papers_collection.query(
-                    query_texts=[""],
-                    n_results=request.limit,
-                    include=["metadatas"]
-                )
+                print("No embeddings found, falling back to random papers")
+                all_papers = papers_collection.get()
+                random_ids = random.sample(all_papers["ids"], min(request.limit, len(all_papers["ids"])))
+                results = papers_collection.get(ids=random_ids)
             else:
+                print("Calculating average embedding")
                 # Calculate average embedding of interacted papers
                 avg_embedding = [
                     sum(emb) / len(emb) 
                     for emb in zip(*interacted_papers["embeddings"])
                 ]
+                print(f"Average embedding: {avg_embedding[:5]}...")
                 
                 # Search similar papers
+                print("Querying similar papers")
                 results = papers_collection.query(
                     query_embeddings=[avg_embedding],
                     n_results=request.limit,
                     include=["metadatas", "distances"]
                 )
+                print(f"Query results: {results}")
         
-        # Format recommendations
+        # Format recommendations with strict validation
         recommendations = []
-        for i in range(len(results["ids"][0])):
-            recommendations.append({
-                "paper_id": results["metadatas"][0][i]["paper_id"],
-                "title": results["metadatas"][0][i]["title"],
-                "score": 1 - results["distances"][0][i] if results.get("distances") else 1.0
-            })
+        valid_papers = papers_collection.get()
+        print(f"Valid papers in collection: {len(valid_papers['ids'])}")
+        
+        if "metadatas" in results and results["metadatas"]:
+            for i in range(len(results["ids"][0])):
+                if not results["metadatas"][0][i] or "paper_id" not in results["metadatas"][0][i]:
+                    print(f"Invalid metadata for paper {results['ids'][0][i]}")
+                    continue
+                    
+                paper_id = results["metadatas"][0][i]["paper_id"]
+                print(f"Checking paper ID: {paper_id}")
+                
+                # Verify paper exists in collection
+                if paper_id not in valid_papers["ids"]:
+                    print(f"Paper ID {paper_id} not found in collection")
+                    continue
+                
+                # Ensure required fields exist
+                if "title" not in results["metadatas"][0][i]:
+                    print(f"Missing title for paper {paper_id}")
+                    continue
+                    
+                recommendations.append({
+                    "paper_id": paper_id,
+                    "title": results["metadatas"][0][i]["title"],
+                    "score": 1 - results["distances"][0][i] if results.get("distances") else 1.0
+                })
+            
+        print(f"Final recommendations: {recommendations}")
+        
+        if not recommendations:
+            error_msg = "No valid recommendations found after validation"
+            print(error_msg)
+            raise HTTPException(
+                status_code=404,
+                detail=error_msg
+            )
         
         return schemas.PaperRecommendResponse(
             recommendations=recommendations,

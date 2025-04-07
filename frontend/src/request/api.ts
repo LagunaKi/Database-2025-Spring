@@ -93,8 +93,23 @@ interface Paper {
   published_date?: string;
 }
 
+interface RecommendRequest {
+  paper_ids: string[];
+  limit?: number;
+}
+
+interface RecommendResponse {
+  recommendations: Paper[];
+}
+
 export const ChatWithLLM = (data: LLMRequest): Promise<LLMResponse> =>
     instance.post(`/api/chat`, data);
 
 export const getPaperDetail = (id: string): Promise<Paper> =>
     instance.get(`/api/papers/${id}`);
+
+export const getRecommendations = (paper_id: string): Promise<Paper> =>
+    instance.get(`/api/recommendations/${paper_id}`);
+
+export const recordPaperInteraction = (paper_id: string, action_type: string): Promise<void> =>
+    instance.post(`/api/papers/${paper_id}/interact`, {action_type});

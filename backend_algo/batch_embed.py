@@ -38,6 +38,7 @@ except Exception as e:
     print(f"API connection failed: {str(e)}")
     raise
 
+# process papers which are not processed yet
 def get_unprocessed_papers(db: Session, limit: int = 100) -> List[models.Paper]:
     return db.query(models.Paper).filter(
         models.Paper.is_processed == False

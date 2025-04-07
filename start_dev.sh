@@ -33,7 +33,7 @@ fi
 # 启动业务层后端
 echo "Starting backend service..."
 conda activate fastapi
-cd $PROJECT_ROOT && uvicorn backend.main:app --port 8000 --reload &
+cd $PROJECT_ROOT && uvicorn backend.main:app --port 8000 --reload --workers 1 --no-access-log &
 sleep 3  # 等待后端服务初始化
 
 # 检查后端服务是否启动

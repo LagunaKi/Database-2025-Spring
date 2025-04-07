@@ -106,7 +106,7 @@ class PaperEmbedResponse(BaseModel):
 
 class UserPaperInteractionBase(BaseModel):
     user_id: int
-    paper_id: int
+    paper_id: str  # Changed from int to match Paper model
     action_type: str
 
 
