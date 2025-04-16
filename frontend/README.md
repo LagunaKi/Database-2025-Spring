@@ -8,6 +8,11 @@ Node Version: v20.12.1
 npm install
 ```
 
+### for markdown view
+```sh
+npm install markdown-it @types/markdown-it
+```
+
 ### Compile and Hot-Reload for Development
 
 ```sh

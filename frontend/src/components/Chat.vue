@@ -4,13 +4,20 @@ import type { FormInstance, FormRules } from 'element-plus';
 import { ElMessage } from 'element-plus';
 import { ChatWithLLM } from "@/request/api";
 import PaperDetail from './PaperDetail.vue';
+import MarkdownIt from 'markdown-it';
 
 const ruleFormRef = ref<FormInstance>();
+const isLoading = ref(false);
+const md = new MarkdownIt();
 
 const chatForm = reactive({
   prompt: '',
   response: '',
 });
+
+const renderMarkdown = (text: string) => {
+  return md.render(text);
+};
 
 interface Paper {
   id: string;
@@ -36,6 +43,7 @@ const submitForm = (formEl: FormInstance | undefined) => {
   if (!formEl) return;
   formEl.validate(async (valid) => {
     if (valid) {
+      isLoading.value = true;
       try {
         const res = await ChatWithLLM({ prompt: chatForm.prompt });
         chatForm.response = res.response;
@@ -43,6 +51,8 @@ const submitForm = (formEl: FormInstance | undefined) => {
       } catch (e) {
         console.log(e);
         ElMessage.error('获取论文信息失败');
+      } finally {
+        isLoading.value = false;
       }
     }
   });
@@ -80,7 +90,13 @@ const submitForm = (formEl: FormInstance | undefined) => {
       </div>
       <div class="response-box">
         <h3 style="color: white;">回答：</h3>
-        <div class="response-content" style="color: white;">{{ chatForm.response }}</div>
+        <div v-if="isLoading" class="loading-spinner"></div>
+        <div 
+          v-else
+          class="response-content" 
+          style="color: white;" 
+          v-html="renderMarkdown(chatForm.response)"
+        ></div>
       </div>
     </div>
 
@@ -168,5 +184,20 @@ const submitForm = (formEl: FormInstance | undefined) => {
 .response-content {
   margin-top: 10px;
   white-space: pre-wrap;
+}
+
+.loading-spinner {
+  display: block;
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(255,255,255,.3);
+  border-radius: 50%;
+  border-top-color: #fff;
+  animation: spin 1s ease-in-out infinite;
+  margin: 20px auto;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>
