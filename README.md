@@ -13,23 +13,25 @@
 
 # 部署和使用方法
 ### 更新数据库
-处理论文向量并存储到ChromaDB：
-``` bash
-python backend_algo/batch_embed.py
-```
-
 爬取论文：
 ``` bash
 python backend_algo/arxiv_crawler.py
-```
+```  
+
+处理论文向量并存储到ChromaDB：
+``` bash
+python backend_algo/batch_embed.py
+```  
 ### 启动命令
 在git bash运行
 ``` bash
 chmod +x start_dev.sh
 ./start_dev.sh
-```  
+```
+
 在前端启动好之后（跳出前端链接），即可使用。  
 前端链接（以控制台输出为准）：http://localhost:5173/  
+
 打开后，注册并登录，进入“聊天”页面，在对话框输入问题（最好和NLP, AI, ML相关，因为目前只爬取了这些领域的论文），搜索后等待片刻，即可得到大模型文字回答和右方相关论文列表，点击论文即可查看详情，并且能得到其它论文推荐（根据用户最近的论文查看行为推荐）。
 
 # 代码结构
