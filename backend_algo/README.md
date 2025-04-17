@@ -31,4 +31,3 @@ uvicorn main:app --port 8001
 ## 爬取论文
 
 首次运行：python backend_algo/arxiv_crawler.py
-启动定时服务：python backend_algo/sync_service.py

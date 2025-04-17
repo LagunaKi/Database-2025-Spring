@@ -12,6 +12,46 @@
 - 算法层：`backend_algo`
 
 # 部署和使用方法
+### 配置python环境
+建立环境，命名为fastapi，并安装依赖：
+``` bash
+conda create -n fastapi python=3.12
+conda activate fastapi
+cd backend
+pip install -r requirements.txt
+cd ..
+cd backend_algo
+pip install -r requirements.txt
+```  
+
+### 安装前端依赖
+```sh
+cd frontend
+npm install
+```  
+
+### 配置MySQL数据库
+MySQL下载并安装：https://dev.mysql.com/downloads/installer/  
+打开MySQL Command Line Client  
+输入安装时设置的 ​​root 用户密码  
+创建数据库：test  
+``` mysql
+CREATE DATABASE test;
+```  
+​​验证数据库是否创建成功​​
+``` mysql
+SHOW DATABASES;
+```  
+如果看到 test 出现在列表中，表示创建成功。  
+安装依赖(fastapi环境)：  
+``` bash
+pip install PyMySQL[rsa]
+```
+修改backend/database.py:  
+``` python
+SQLALCHEMY_DATABASE_URL = "mysql+pymysql://root:你的数据库密码@localhost:3306/test"
+```
+
 ### 更新数据库
 爬取论文：
 ``` bash

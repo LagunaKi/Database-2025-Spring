@@ -3,7 +3,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
 # SQLALCHEMY_DATABASE_URL = "sqlite:///sqlite.db"
-SQLALCHEMY_DATABASE_URL = "mysql+pymysql://root:8352@localhost:3306/test"
+SQLALCHEMY_DATABASE_URL = "mysql+pymysql://root:12348765sql@localhost:3306/test"
 
 
 engine = create_engine(
