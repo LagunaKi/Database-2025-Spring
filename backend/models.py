@@ -48,3 +48,30 @@ class UserPaperInteraction(Base):
 
     user = relationship("User", back_populates="papers")
     paper = relationship("Paper", back_populates="users")
+
+
+class ChatResponse(Base):
+    __tablename__ = "chat_responses"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    prompt = Column(Text)
+    response = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+    matched_papers = relationship("AnswerPaperMatch", back_populates="chat_response")
+
+
+class AnswerPaperMatch(Base):
+    __tablename__ = "answer_paper_matches"
+
+    id = Column(Integer, primary_key=True)
+    response_id = Column(Integer, ForeignKey("chat_responses.id"))
+    paper_id = Column(String(50), ForeignKey("papers.id"))
+    match_score = Column(Integer)  # 匹配分数
+    matched_section = Column(Text)  # 回答中匹配的部分
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    chat_response = relationship("ChatResponse", back_populates="matched_papers")
+    paper = relationship("Paper")

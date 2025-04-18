@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, List, Optional
+from typing import Annotated, List, Optional, Tuple
 import re
 import jwt
 from fastapi import Depends, FastAPI, HTTPException, status, Request, Query
@@ -286,34 +286,174 @@ async def read_user(
     return db_user
 
 
+def calculate_semantic_similarity(text1: str, text2: str) -> float:
+    """计算两段文本的语义相似度"""
+    # 调用本地embedding服务
+    try:
+        resp = requests.post(
+            "http://10.176.64.152:11435/v1/embeddings",
+            json={
+                "model": "bge-m3",
+                "input": [text1, text2]
+            },
+            timeout=5
+        )
+        resp.raise_for_status()
+        embeddings = resp.json()["data"]
+        vec1 = embeddings[0]["embedding"]
+        vec2 = embeddings[1]["embedding"]
+        
+        # 计算余弦相似度
+        dot_product = sum(a*b for a, b in zip(vec1, vec2))
+        norm1 = sum(a*a for a in vec1) ** 0.5
+        norm2 = sum(b*b for b in vec2) ** 0.5
+        return dot_product / (norm1 * norm2)
+    except Exception as e:
+        print(f"Error calculating similarity: {str(e)}")
+        return 0.0
+
+def analyze_answer_matches(answer: str, papers: List[models.Paper]) -> List[schemas.AnswerPaperMatch]:
+    """分析回答内容与论文的匹配关系"""
+    matches = []
+    
+    # 将回答分割成句子
+    sentences = re.split(r'(?<=[.!?])\s+', answer)
+    
+    for sentence in sentences:
+        if not sentence.strip():
+            continue
+            
+        # 为每个句子找到最佳匹配的论文
+        best_match = None
+        best_score = 0
+        
+        for paper in papers:
+            # 计算句子与论文内容的语义相似度
+            paper_content = f"Title: {paper.title}\nAbstract: {paper.abstract}"
+            similarity = calculate_semantic_similarity(sentence, paper_content)
+            
+            if similarity > best_score:
+                best_score = similarity
+                best_match = paper
+                
+        if best_match and best_score > 0.5:  # 只考虑质量较好的匹配
+            matches.append(schemas.AnswerPaperMatch(
+                paper_id=best_match.id,
+                match_score=best_score,
+                matched_section=sentence,
+                paper=best_match
+            ))
+    
+    return matches
+
+def get_similar_papers(paper_id: str, limit: int = 3) -> List[models.Paper]:
+    """获取与指定论文相似的论文"""
+    try:
+        # 调用向量数据库获取相似论文
+        results = papers_collection.query(
+            query_texts=[f"Find papers similar to {paper_id}"],
+            n_results=limit,
+            where={"paper_id": {"$ne": paper_id}}  # 排除当前论文
+        )
+        
+        # 从结果中提取论文ID
+        paper_ids = [meta["paper_id"] for meta in results["metadatas"][0]]
+        
+        # 从数据库获取完整论文信息
+        db = SessionLocal()
+        try:
+            papers = []
+            for pid in paper_ids:
+                paper = crud.get_paper(db, paper_id=pid)
+                if paper:
+                    papers.append(paper)
+            return papers
+        finally:
+            db.close()
+            
+    except Exception as e:
+        print(f"Error finding similar papers: {str(e)}")
+        return []
+
+async def generate_llm_response(prompt: str) -> str:
+    """Generate LLM response by calling backend_algo service"""
+    try:
+        response = requests.post(
+            "http://localhost:8001/chat/",
+            json={
+                "messages": [{
+                    "role": "user",
+                    "content": prompt
+                }]
+            }
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        logger.error(f"Failed to generate LLM response: {str(e)}")
+        raise HTTPException(
+            status_code=503,
+            detail="Failed to generate response from LLM"
+        )
+
 @app.post("/api/chat", response_model=schemas.ChatResponse)
 async def chat(
         current_user: Annotated[schemas.User, Depends(get_current_active_user)],
         chat_request: schemas.ChatRequest,
         db: SessionDep
 ):
+    """Enhanced chat endpoint with answer-based recommendations"""
     try:
-        # 获取大模型回答
-        resp = requests.post('http://localhost:8001/chat/', json={
-            'messages': [{
-                'role': 'user',
-                'content': chat_request.prompt
-            }]
-        }, timeout=10)
-        resp.raise_for_status()
+        logger.info(f"Chat request from user {current_user.id}: {chat_request.prompt[:50]}...")
         
-        # 解析LLM响应
-        llm_response = resp.json().get('choices', [{}])[0].get('message', {}).get('content', '')
+        # 1. 获取初始回答和相关论文
+        llm_response = await generate_llm_response(chat_request.prompt)
+        initial_papers = crud.search_papers(db, query=chat_request.prompt, limit=5)
+        logger.info(f"Found {len(initial_papers)} initial papers")
         
-        # 搜索相关论文
-        papers = crud.search_papers(db, query=chat_request.prompt, limit=5)
-        print(f"Found {len(papers)} papers for query: {chat_request.prompt}")  # 调试日志
-        for i, paper in enumerate(papers):
-            print(f"Paper {i+1}: {paper.title}")
+        # 2. 分析回答与论文的匹配关系
+        answer_matches = analyze_answer_matches(llm_response, initial_papers)
+        logger.info(f"Found {len(answer_matches)} answer matches")
         
+        # 3. 基于回答内容获取额外推荐论文
+        recommended_papers = []
+        if answer_matches:
+            # 获取匹配度最高的3篇论文
+            top_matches = sorted(answer_matches, key=lambda x: x.match_score, reverse=True)[:3]
+            for match in top_matches:
+                # 获取每篇匹配论文的相似论文
+                similar = get_similar_papers(match.paper_id, limit=1)
+                if similar:
+                    recommended_papers.extend(similar)
+            logger.info(f"Found {len(recommended_papers)} recommended papers")
+        
+        # 4. 合并结果并去重
+        all_papers = list({p.id: p for p in initial_papers + recommended_papers}.values())
+        
+        # 5. 保存结果到数据库
+        chat_response = models.ChatResponse(
+            user_id=current_user.id,
+            prompt=chat_request.prompt,
+            response=llm_response
+        )
+        db.add(chat_response)
+        db.commit()
+        
+        for match in answer_matches:
+            db_match = models.AnswerPaperMatch(
+                response_id=chat_response.id,
+                paper_id=match.paper_id,
+                match_score=match.match_score,
+                matched_section=match.matched_section
+            )
+            db.add(db_match)
+        db.commit()
+        
+        logger.info(f"Returning {len(all_papers)} papers to user")
         return schemas.ChatResponse(
             response=llm_response,
-            papers=papers
+            papers=all_papers,
+            matches=answer_matches
         )
     except requests.exceptions.RequestException as e:
         print(f"Error calling chat service: {str(e)}")
@@ -416,9 +556,32 @@ async def search_papers(
         current_user: Annotated[schemas.User, Depends(get_current_active_user)],
         query: str,
         db: SessionDep,
-        limit: int = 10
+        limit: int = 10,
+        search_type: str = "keyword"  # "keyword" or "answer"
 ):
-    papers = crud.search_papers(db, query=query, limit=limit)
+    if search_type == "answer":
+        # Get recent chat responses for this user
+        responses = db.query(models.ChatResponse).filter(
+            models.ChatResponse.user_id == current_user.id
+        ).order_by(models.ChatResponse.created_at.desc()).limit(3).all()
+        
+        if not responses:
+            raise HTTPException(
+                status_code=400,
+                detail="No chat history available for answer-based search"
+            )
+            
+        # Combine responses to form search context
+        answer_text = " ".join([r.response for r in responses])
+        papers = crud.search_papers(db, query=query, limit=limit)
+        matches = analyze_answer_matches(answer_text, papers)
+        
+        # Sort papers by match score
+        paper_scores = {m.paper_id: m.match_score for m in matches}
+        papers.sort(key=lambda p: paper_scores.get(p.id, 0), reverse=True)
+    else:
+        # Standard keyword search
+        papers = crud.search_papers(db, query=query, limit=limit)
     
     # Record searched papers in user_paper_interactions
     for paper in papers:
@@ -430,7 +593,7 @@ async def search_papers(
         crud.record_user_interaction(db=db, interaction=interaction)
     
     db.commit()
-    return schemas.PaperSearchResponse(papers=papers, search_time=0.0)
+    return schemas.PaperSearchResponse(papers=papers[:limit], search_time=0.0)
 
 
 async def _handle_recommendation(

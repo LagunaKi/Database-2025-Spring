@@ -54,9 +54,17 @@ interface LLMRequest {
     prompt: string
 }
 
+interface Match {
+  paper_id: string;
+  match_score: number;
+  matched_section: string;
+  paper?: Paper;
+}
+
 interface LLMResponse {
-    response: string
-    papers: Paper[] // added
+    response: string;
+    papers: Paper[];
+    matches?: Match[];
 }
 
 //测试hello api

@@ -56,14 +56,29 @@ class ChatRequest(BaseModel):
     prompt: str
 
 
+class AnswerPaperMatch(BaseModel):
+    paper_id: str
+    match_score: float
+    matched_section: str
+    paper: Optional[Paper] = None
+
+    class Config:
+        from_attributes = True
+
 class ChatResponse(BaseModel):
     response: str
     papers: List[Paper]
+    matches: List[AnswerPaperMatch] = []
 
 
 class PaperList(BaseModel):
     total: int
     papers: List[Paper]
+
+
+class AnswerSearchRequest(BaseModel):
+    answer_text: str
+    limit: int = 5
 
 
 class PaperList(BaseModel):

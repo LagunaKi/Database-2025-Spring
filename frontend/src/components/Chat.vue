@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue';
-import type { FormInstance, FormRules } from 'element-plus';
+import type { FormInstance } from 'element-plus';
 import { ElMessage } from 'element-plus';
 import { ChatWithLLM } from "@/request/api";
 import PaperDetail from './PaperDetail.vue';
+import HighlightText from './HighlightText.vue';
 import MarkdownIt from 'markdown-it';
 
 const ruleFormRef = ref<FormInstance>();
@@ -16,8 +17,12 @@ const chatForm = reactive({
 });
 
 const renderMarkdown = (text: string) => {
+  // 先渲染纯Markdown
+  md.set({ html: true });
   return md.render(text);
 };
+
+
 
 interface Paper {
   id: string;
@@ -30,7 +35,15 @@ interface Paper {
   published_date?: string;
 }
 
+interface Match {
+  paper_id: string;
+  match_score: number;
+  matched_section: string;
+  paper?: Paper;
+}
+
 const papers = ref<Paper[]>([]);
+const matches = ref<Match[]>([]);
 const showPaperDetail = ref(false);
 const currentPaper = ref<Paper | null>(null);
 
@@ -39,6 +52,8 @@ const viewPaperDetail = (paper: Paper) => {
   showPaperDetail.value = true;
 };
 
+
+
 const submitForm = (formEl: FormInstance | undefined) => {
   if (!formEl) return;
   formEl.validate(async (valid) => {
@@ -46,8 +61,23 @@ const submitForm = (formEl: FormInstance | undefined) => {
       isLoading.value = true;
       try {
         const res = await ChatWithLLM({ prompt: chatForm.prompt });
+        console.log('Raw matches data:', res.matches);
+        console.log('Raw papers data:', res.papers);
+        
+        // Ensure matches have paper objects
+        const enrichedMatches = res.matches?.map(match => {
+          const paper = res.papers.find(p => p.id === match.paper_id);
+          console.log(`Processing match for paper ${match.paper_id}:`, match, 'Found paper:', paper);
+          return {
+            ...match,
+            paper: paper
+          };
+        }) ?? [];
+        
+        console.log('Enriched matches:', enrichedMatches);
         chatForm.response = res.response;
         papers.value = res.papers;
+        matches.value = enrichedMatches;
       } catch (e) {
         console.log(e);
         ElMessage.error('获取论文信息失败');
@@ -94,9 +124,13 @@ const submitForm = (formEl: FormInstance | undefined) => {
         <div 
           v-else
           class="response-content" 
-          style="color: white;" 
-          v-html="renderMarkdown(chatForm.response)"
-        ></div>
+          style="color: white;"
+        >
+          <HighlightText 
+            :text="renderMarkdown(chatForm.response)"
+            :matches="matches"
+          />
+        </div>
       </div>
     </div>
 
@@ -104,7 +138,25 @@ const submitForm = (formEl: FormInstance | undefined) => {
       <div class="paper-container">
         <h3 style="color: white;">相关论文</h3>
         <el-table :data="papers" style="width: 100%">
-          <el-table-column prop="title" label="标题" width="180" />
+          <el-table-column prop="title" label="标题" width="180">
+            <template #default="{row}">
+              <div>
+                {{ row.title }}
+                <!-- 仅当匹配度大于0.3时显示匹配度信息 -->
+                <div v-if="matches.find(m => m.paper_id === row.id)?.match_score > 0.3" class="match-info">
+                  <el-tag size="small" type="success">
+                    匹配度: {{ (matches.find(m => m.paper_id === row.id)?.match_score * 100).toFixed(0) }}%
+                  </el-tag>
+                  <div class="match-section">
+                    {{ matches.find(m => m.paper_id === row.id)?.matched_section }}
+                  </div>
+                </div>
+                <div v-else class="no-match-info">
+                  <el-tag size="small" type="info">相关论文</el-tag>
+                </div>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column label="作者">
             <template #default="{row}">
               {{ row.authors.join(', ') }}
@@ -137,6 +189,105 @@ const submitForm = (formEl: FormInstance | undefined) => {
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
+  position: relative;
+}
+
+.highlight {
+  position: relative;
+  background-color: rgba(255, 215, 0, 0.3);
+  border-bottom: 2px solid gold;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.highlight:hover {
+  background-color: rgba(255, 215, 0, 0.5);
+  box-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
+}
+
+.highlight-title {
+  background-color: rgba(100, 200, 255, 0.3);
+  border-bottom: 2px solid #64c8ff;
+}
+
+.highlight {
+  position: relative;
+  display: inline;
+}
+
+.highlight .tooltip {
+  display: none !important;
+  position: absolute;
+  bottom: calc(100% + 5px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 300px;
+  max-width: 400px;
+  padding: 12px;
+  background: rgba(30, 30, 30, 0.95) !important;
+  color: white !important;
+  border-radius: 6px;
+  z-index: 1000;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(4px);
+}
+
+.highlight:hover .tooltip {
+  display: block !important;
+}
+
+.highlight .tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 6px;
+  border-style: solid;
+  border-color: rgba(30, 30, 30, 0.95) transparent transparent transparent;
+}
+
+.match-tooltip {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.match-tooltip .match-title {
+  font-weight: bold;
+  margin-bottom: 8px;
+  color: #ffd700;
+  font-size: 15px;
+}
+
+.match-tooltip .match-score {
+  color: #fff;
+  background: rgba(255, 215, 0, 0.2);
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-block;
+  margin-bottom: 8px;
+}
+
+.match-tooltip .match-authors {
+  color: #ccc;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.highlight-title {
+  background-color: rgba(100, 200, 255, 0.3);
+  border-bottom: 2px solid #64c8ff;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.highlight-title:hover {
+  background-color: rgba(100, 200, 255, 0.5);
+  box-shadow: 0 0 8px rgba(100, 200, 255, 0.3);
 }
 
 .main-content {
@@ -184,6 +335,50 @@ const submitForm = (formEl: FormInstance | undefined) => {
 .response-content {
   margin-top: 10px;
   white-space: pre-wrap;
+  position: relative;
+  overflow: visible;
+  z-index: 1;
+}
+
+.highlight {
+  position: relative;
+  background-color: rgba(255, 215, 0, 0.3);
+  border-bottom: 1px dashed gold;
+  cursor: help;
+  z-index: 2;
+}
+
+.highlight .tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 5px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 300px;
+  max-width: 400px;
+  padding: 12px;
+  background: rgba(30, 30, 30, 0.95);
+  color: white;
+  border-radius: 6px;
+  z-index: 1000;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(4px);
+}
+
+.highlight:hover .tooltip {
+  display: block;
+}
+
+.match-info {
+  margin-top: 4px;
+}
+
+.match-section {
+  font-size: 12px;
+  color: #ccc;
+  margin-top: 2px;
 }
 
 .loading-spinner {
