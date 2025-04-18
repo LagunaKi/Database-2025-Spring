@@ -7,23 +7,7 @@ import PaperDetail from './PaperDetail.vue';
 import HighlightText from './HighlightText.vue';
 import MarkdownIt from 'markdown-it';
 
-const ruleFormRef = ref<FormInstance>();
-const isLoading = ref(false);
-const md = new MarkdownIt();
-
-const chatForm = reactive({
-  prompt: '',
-  response: '',
-});
-
-const renderMarkdown = (text: string) => {
-  // 先渲染纯Markdown
-  md.set({ html: true });
-  return md.render(text);
-};
-
-
-
+// 添加类型声明
 interface Paper {
   id: string;
   title: string;
@@ -41,6 +25,27 @@ interface Match {
   matched_section: string;
   paper?: Paper;
 }
+
+const ruleFormRef = ref<FormInstance>();
+const isLoading = ref(false);
+const md = new MarkdownIt();
+
+const chatForm = reactive({
+  prompt: '',
+  response: '',
+});
+
+const renderMarkdown = (text: string) => {
+  // 仅渲染基本Markdown，保留原始文本结构
+  md.set({ 
+    html: true,
+    breaks: true,
+    linkify: true,
+    typographer: false
+  });
+  // 移除Markdown渲染中的特殊处理
+  return text;
+};
 
 const papers = ref<Paper[]>([]);
 const matches = ref<Match[]>([]);
@@ -61,23 +66,34 @@ const submitForm = (formEl: FormInstance | undefined) => {
       isLoading.value = true;
       try {
         const res = await ChatWithLLM({ prompt: chatForm.prompt });
-        console.log('Raw matches data:', res.matches);
-        console.log('Raw papers data:', res.papers);
         
-        // Ensure matches have paper objects
+        // 确保matches数据结构正确
         const enrichedMatches = res.matches?.map(match => {
           const paper = res.papers.find(p => p.id === match.paper_id);
-          console.log(`Processing match for paper ${match.paper_id}:`, match, 'Found paper:', paper);
+          if (!paper) {
+            console.warn(`No paper found for match with paper_id: ${match.paper_id}`);
+            return null;
+          }
           return {
-            ...match,
-            paper: paper
+            paper_id: match.paper_id,
+            match_score: match.match_score,
+            matched_section: match.matched_section,
+            paper: {
+              id: paper.id,
+              title: paper.title,
+              authors: paper.authors
+            }
           };
-        }) ?? [];
+        }).filter(match => match !== null) ?? [];
         
-        console.log('Enriched matches:', enrichedMatches);
         chatForm.response = res.response;
         papers.value = res.papers;
         matches.value = enrichedMatches;
+        
+        // 调试日志
+        console.log('Response:', res.response);
+        console.log('Matches:', enrichedMatches);
+        console.log('Papers:', res.papers);
       } catch (e) {
         console.log(e);
         ElMessage.error('获取论文信息失败');
@@ -122,13 +138,13 @@ const submitForm = (formEl: FormInstance | undefined) => {
         <h3 style="color: white;">回答：</h3>
         <div v-if="isLoading" class="loading-spinner"></div>
         <div 
-          v-else
+          v-else-if="chatForm.response && matches"
           class="response-content" 
           style="color: white;"
         >
           <HighlightText 
             :text="renderMarkdown(chatForm.response)"
-            :matches="matches"
+            :matches="matches ?? []"
           />
         </div>
       </div>
@@ -143,17 +159,22 @@ const submitForm = (formEl: FormInstance | undefined) => {
               <div>
                 {{ row.title }}
                 <!-- 仅当匹配度大于0.3时显示匹配度信息 -->
-                <div v-if="matches.find(m => m.paper_id === row.id)?.match_score > 0.3" class="match-info">
-                  <el-tag size="small" type="success">
-                    匹配度: {{ (matches.find(m => m.paper_id === row.id)?.match_score * 100).toFixed(0) }}%
-                  </el-tag>
-                  <div class="match-section">
-                    {{ matches.find(m => m.paper_id === row.id)?.matched_section }}
+                <template v-if="matches?.length">
+                  <div class="match-info">
+                    <template v-if="matches.find(m => m?.paper_id === row.id)?.match_score === undefined || 
+                      (matches.find(m => m?.paper_id === row.id)?.match_score ?? 0) < 0.3">
+                      <el-tag size="small" type="info">相关论文</el-tag>
+                    </template>
+                    <template v-else>
+                      <el-tag size="small" type="success">
+                        匹配度: {{ ((matches.find(m => m?.paper_id === row.id)?.match_score ?? 0) * 100).toFixed(0) }}%
+                      </el-tag>
+                      <div class="match-section">
+                        {{ matches.find(m => m?.paper_id === row.id)?.matched_section || '' }}
+                      </div>
+                    </template>
                   </div>
-                </div>
-                <div v-else class="no-match-info">
-                  <el-tag size="small" type="info">相关论文</el-tag>
-                </div>
+                </template>
               </div>
             </template>
           </el-table-column>
@@ -190,16 +211,6 @@ const submitForm = (formEl: FormInstance | undefined) => {
   background-position: center;
   background-repeat: no-repeat;
   position: relative;
-}
-
-.highlight {
-  position: relative;
-  background-color: rgba(255, 215, 0, 0.3);
-  border-bottom: 2px solid gold;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  border-radius: 2px;
-  padding: 0 2px;
 }
 
 .highlight:hover {
