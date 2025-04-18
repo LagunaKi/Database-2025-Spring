@@ -48,8 +48,8 @@ def process_paper(db: Session, paper: models.Paper) -> bool:
     try:
         print(f"Processing paper {paper.id}: {paper.title[:50]}...")
         
-        # Prepare paper data
-        combined_text = f"Title: {paper.title}\nAbstract: {paper.abstract}\nKeywords: {', '.join(paper.keywords) if paper.keywords else ''}"
+        # 把论文标题、摘要、关键词合并成一个文本，并进行向量化
+        combined_text = f"Title: {paper.title}\nAbstract: {paper.abstract}\nKeywords: {', '.join(paper.keywords) if paper.keywords else ''}" 
         
         # Store in vector database
         print("Adding to ChromaDB collection...")

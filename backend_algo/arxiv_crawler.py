@@ -65,7 +65,7 @@ def save_papers_to_db(papers: List[ArxivPaper]):
     db = SessionLocal()
     try:
         for paper in papers:
-            if not crud.get_paper(db, paper_id=paper.id):
+            if not crud.get_paper(db, paper_id=paper.id): # 只有当论文不存在时才会添加到数据库
                 db_paper = models.Paper(
                     id=paper.id,
                     title=paper.title,
