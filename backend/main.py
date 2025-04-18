@@ -396,6 +396,7 @@ async def generate_llm_response(prompt: str) -> str:
             detail="Failed to generate response from LLM"
         )
 
+# [新修改]搜索结果将基于模型回答内容而非用户提问
 @app.post("/api/chat", response_model=schemas.ChatResponse)
 async def chat(
         current_user: Annotated[schemas.User, Depends(get_current_active_user)],
@@ -406,12 +407,14 @@ async def chat(
     try:
         logger.info(f"Chat request from user {current_user.id}: {chat_request.prompt[:50]}...")
         
-        # 1. 获取初始回答和相关论文
+        # 1. 获取模型回答
         llm_response = await generate_llm_response(chat_request.prompt)
-        initial_papers = crud.search_papers(db, query=chat_request.prompt, limit=5)
+        
+        # 2. 基于模型回答搜索相关论文
+        initial_papers = crud.search_papers(db, query=llm_response, limit=5)
         logger.info(f"Found {len(initial_papers)} initial papers")
         
-        # 2. 分析回答与论文的匹配关系
+        # 3. 分析回答与论文的匹配关系
         answer_matches = analyze_answer_matches(llm_response, initial_papers)
         logger.info(f"Found {len(answer_matches)} answer matches")
         
