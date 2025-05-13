@@ -54,7 +54,7 @@ SQLALCHEMY_DATABASE_URL = "mysql+pymysql://root:你的数据库密码@localhost:
 ```
 
 ### 更新数据库
-先启动一次项目，进行相应初始化，不要关闭：
+先在git bash启动一次项目，进行相应初始化，不要关闭：
 ``` bash
 chmod +x start_dev.sh
 ./start_dev.sh
