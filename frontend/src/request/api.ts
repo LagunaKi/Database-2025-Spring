@@ -121,3 +121,6 @@ export const getRecommendations = (paper_id: string): Promise<Paper> =>
 
 export const recordPaperInteraction = (paper_id: string, action_type: string): Promise<void> =>
     instance.post(`/api/papers/${paper_id}/interact`, {action_type});
+
+export const ChatWithKG = (data: { messages: { role: string; content: string }[] }): Promise<LLMResponse> =>
+    instance.post('http://localhost:8001/chat/with-kg', data);

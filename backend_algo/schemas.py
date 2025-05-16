@@ -67,3 +67,22 @@ class PaperRecommendRequest(BaseModel):
 class PaperRecommendResponse(BaseModel):
     recommendations: List[dict]
     recommendation_time: float
+
+
+# 知识图谱三元组模型
+class KGTriple(BaseModel):
+    head: str
+    relation: str
+    tail: str
+    paper_id: str
+    source: str
+
+
+class KGTripleSearchRequest(BaseModel):
+    query: str
+    limit: int = 10
+
+
+class KGTripleSearchResponse(BaseModel):
+    results: List[KGTriple]
+    search_time: float

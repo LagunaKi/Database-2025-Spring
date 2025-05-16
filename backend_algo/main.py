@@ -4,33 +4,41 @@ from backend_algo import schemas
 import requests
 import chromadb
 import chromadb.utils.embedding_functions as embedding_functions
-
+import time
+from fastapi.middleware.cors import CORSMiddleware
+import os
+os.environ.pop("SSL_CERT_FILE", None)
+from backend.database import SessionLocal
+from backend import models
+import numpy as np
+import re
 
 app = FastAPI()
 
 # Initialize ChromaDB client with persistent mode
-chroma_client = None
-papers_collection = None
-try:
-    print("Initializing ChromaDB in persistent mode...")
-    chroma_client = chromadb.PersistentClient(
-        path="chroma_data",
-        settings=chromadb.config.Settings(allow_reset=True)
-    )
-    
-    # Verify connection
-    print("ChromaDB initialized in persistent mode")
-    
-    # Get or create collection
-    papers_collection = chroma_client.get_or_create_collection("papers")
-    print("Successfully connected to ChromaDB collection")
-except Exception as e:
-    print(f"Failed to initialize ChromaDB: {str(e)}")
-    papers_collection = None
+chroma_client = chromadb.HttpClient(host='localhost', port=8002)
+openai_ef = embedding_functions.OpenAIEmbeddingFunction(
+    api_key="API_KEY_IS_NOT_NEEDED",
+    api_base="http://10.176.64.152:11435/v1",
+    model_name="bge-m3"
+)
+papers_collection = chroma_client.get_or_create_collection(
+    name="papers",
+    embedding_function=openai_ef
+)
+print("Successfully connected to ChromaDB HttpClient and papers collection with embedding_function")
 
 
 URL = 'http://10.176.64.152:11434/v1'
 MODEL = 'qwen2.5:7b'
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # 只允许前端开发地址
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.post("/chat/stream/")
@@ -68,6 +76,162 @@ async def chat_stream(conversation: schemas.Conversation):
                 yield raw_line + b'\n'
     
     return StreamingResponse(generator())
+
+
+def get_papers_by_ids(paper_ids):
+    db = SessionLocal()
+    try:
+        papers = db.query(models.Paper).filter(models.Paper.id.in_(paper_ids)).all()
+        paper_dict = {paper.id: paper for paper in papers}
+        return paper_dict
+    finally:
+        db.close()
+
+@app.post("/chat/with-kg")
+async def chat_with_kg(conversation: schemas.Conversation):
+    # 1. 先用LLM生成初步理解
+    processed_messages = []
+    for msg in conversation.messages:
+        if msg.role == 'user':
+            processed_msg = msg.model_dump()
+            processed_msg['content'] = f"你是一个论文搜索系统的ai工具，下面是对你的提问：{msg.content}"
+            processed_messages.append(processed_msg)
+        else:
+            processed_messages.append(msg.model_dump())
+    resp = requests.post(f'{URL}/chat/completions', json={
+        'model': MODEL,
+        'stream': False,
+        'messages': processed_messages,
+    }, stream=False, timeout=60)
+    llm_answer = resp.json()['choices'][0]['message']['content']
+
+    # 2. 用LLM理解结果分别在papers和kg_triples中检索
+    papers_results = papers_collection.query(
+        query_texts=[llm_answer],
+        n_results=5,
+        include=["documents", "metadatas", "distances"]
+    )
+    kg_collection = chroma_client.get_or_create_collection(
+        name="kg_triples",
+        embedding_function=openai_ef
+    )
+    kg_results = kg_collection.query(
+        query_texts=[llm_answer],
+        n_results=12, # 知识图谱检索数量
+        include=["documents", "metadatas", "distances"]
+    )
+
+    # 通过paper_id批量查SQL数据库获取完整论文信息
+    paper_ids = [meta.get("paper_id", "") for meta in papers_results['metadatas'][0]] if papers_results['metadatas'] else []
+    paper_dict = get_papers_by_ids(paper_ids)
+    papers = [
+        {
+            "id": paper.id,
+            "title": paper.title,
+            "authors": paper.authors,
+            "abstract": paper.abstract,
+            "pdf_url": paper.pdf_url,
+            "keywords": paper.keywords,
+            "published_date": paper.published_date,
+            "year": paper.published_date.year if paper.published_date else None
+        }
+        for pid in paper_ids if (paper := paper_dict.get(pid))
+    ]
+
+    # 3. 整合论文摘要、标题、知识图谱三元组，拼接为prompt
+    context = "\n".join([
+        f"论文: {meta['title']}\n摘要: {doc}" for doc, meta in zip(papers_results['documents'][0], papers_results['metadatas'][0])
+    ])
+    kg_context = "\n".join([
+        f"知识: {meta['head']} -[{meta['relation']}]-> {meta['tail']} (来源: {meta['source']})" for meta in kg_results['metadatas'][0]
+    ])
+    final_prompt = f"""
+请你作为一名专业的论文搜索与知识图谱问答助手，结合以下论文内容和知识图谱信息，**紧密围绕用户原始问题进行高质量、聚焦的回答**。
+
+【用户问题】
+{conversation.messages[-1].content}
+
+【相关论文内容】
+{context}
+
+【相关知识图谱三元组】
+{kg_context}
+
+【作答要求】
+1. 回答必须紧扣用户原始问题，避免泛泛而谈或仅堆砌信息。
+2. 如有多条信息，请优先列出与问题最相关的要点，按相关性排序，分点作答。
+3. 回答前请用一句话重述用户问题，确保聚焦。
+4. 如有不足或无法直接回答的地方，请说明原因。
+"""
+
+    # 4. 再次调用LLM生成最终答案
+    final_resp = requests.post(f'{URL}/chat/completions', json={
+        'model': MODEL,
+        'stream': False,
+        'messages': [
+            {"role": "system", "content": "你是一个论文搜索系统的ai工具。"},
+            {"role": "user", "content": final_prompt}
+        ],
+    }, stream=False, timeout=60)
+    final_answer = final_resp.json()['choices'][0]['message']['content']
+
+    # 5. 组装前端需要的结构
+    kg_triples = [
+        {
+            "head": meta.get("head", ""),
+            "relation": meta.get("relation", ""),
+            "tail": meta.get("tail", ""),
+            "paper_id": meta.get("paper_id", ""),
+            "source": meta.get("source", "")
+        }
+        for meta in kg_results['metadatas'][0]
+    ] if kg_results['metadatas'] else []
+    # 生成kg_matches用于高亮（embedding相似度匹配）
+    def split_sentences(text):
+        sents = re.split(r'(?<=[。！？.!?])|\n', text)
+        return [s.strip() for s in sents if s.strip()]
+
+    def get_embeddings(texts):
+        url = "http://10.176.64.152:11435/v1/embeddings"
+        resp = requests.post(url, json={"model": "bge-m3", "input": texts})
+        return [d['embedding'] for d in resp.json()["data"]]
+
+    def cosine_sim(a, b):
+        a = np.array(a)
+        b = np.array(b)
+        return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+    def find_kg_matches_by_embedding(final_answer, kg_triples, threshold=0.5):
+        sents = split_sentences(final_answer)
+        if not sents: return []
+        sent_embs = get_embeddings(sents)
+        matches = []
+        for triple in kg_triples:
+            triple_text = f"{triple['head']} {triple['relation']} {triple['tail']} {triple['source']}"
+            triple_emb = get_embeddings([triple_text])[0]
+            # 计算与每个句子的相似度
+            for i, sent_emb in enumerate(sent_embs):
+                sim = cosine_sim(triple_emb, sent_emb)
+                if sim > threshold:
+                    matches.append({
+                        'matched_section': sents[i],
+                        'head': triple['head'],
+                        'relation': triple['relation'],
+                        'tail': triple['tail'],
+                        'source': triple['source'],
+                        'score': sim
+                    })
+                    break  # 一个三元组只高亮一次
+        return matches
+
+    kg_matches = find_kg_matches_by_embedding(final_answer, kg_triples, threshold=0.7)
+    return {
+        "response": final_answer,
+        "papers": papers,
+        "matches": [],
+        "kg_triples": kg_triples,
+        "kg_matches": kg_matches
+    }
 
 
 @app.post("/chat/", response_model=schemas.ConversationResponse)
@@ -283,3 +447,31 @@ async def recommend_papers(request: schemas.PaperRecommendRequest):
             status_code=500,
             detail="Recommendation failed"
         )
+
+
+@app.post("/kg/vector-search", response_model=schemas.KGTripleSearchResponse)
+async def kg_vector_search(request: schemas.KGTripleSearchRequest):
+    try:
+        kg_collection = chroma_client.get_or_create_collection("kg_triples")
+        results = kg_collection.query(
+            query_texts=[request.query],
+            n_results=request.limit,
+            include=["documents", "metadatas", "distances"]
+        )
+        triples = []
+        for i in range(len(results["ids"][0])):
+            meta = results["metadatas"][0][i]
+            triples.append(schemas.KGTriple(
+                head=meta["head"],
+                relation=meta["relation"],
+                tail=meta["tail"],
+                paper_id=meta["paper_id"],
+                source=meta["source"]
+            ))
+        return schemas.KGTripleSearchResponse(
+            results=triples,
+            search_time=0.0
+        )
+    except Exception as e:
+        print(f"KG vector search failed: {e}")
+        raise HTTPException(status_code=500, detail="KG vector search failed")

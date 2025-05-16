@@ -2,7 +2,7 @@
 import { reactive, ref } from 'vue';
 import type { FormInstance } from 'element-plus';
 import { ElMessage } from 'element-plus';
-import { ChatWithLLM } from "@/request/api";
+import { ChatWithLLM, ChatWithKG } from "@/request/api";
 import PaperDetail from './PaperDetail.vue';
 import HighlightText from './HighlightText.vue';
 import MarkdownIt from 'markdown-it';
@@ -25,6 +25,15 @@ interface Match {
   matched_section: string;
   paper?: Paper;
 }
+
+// 新增知识图谱三元组类型
+type KGTriple = {
+  head: string;
+  relation: string;
+  tail: string;
+  paper_id: string;
+  source: string;
+};
 
 const ruleFormRef = ref<FormInstance>();
 const isLoading = ref(false);
@@ -51,13 +60,13 @@ const papers = ref<Paper[]>([]);
 const matches = ref<Match[]>([]);
 const showPaperDetail = ref(false);
 const currentPaper = ref<Paper | null>(null);
+const kgTriples = ref<KGTriple[]>([]);
+const kgMatches = ref<any[]>([]);
 
 const viewPaperDetail = (paper: Paper) => {
   currentPaper.value = paper;
   showPaperDetail.value = true;
 };
-
-
 
 const submitForm = (formEl: FormInstance | undefined) => {
   if (!formEl) return;
@@ -65,9 +74,9 @@ const submitForm = (formEl: FormInstance | undefined) => {
     if (valid) {
       isLoading.value = true;
       try {
-        const res = await ChatWithLLM({ prompt: chatForm.prompt });
-        
-        // 确保matches数据结构正确
+        // 修正：传递messages数组
+        const res = await ChatWithKG({ messages: [ { role: 'user', content: chatForm.prompt } ] });
+        // 兼容原有结构
         const enrichedMatches = res.matches?.map(match => {
           const paper = res.papers.find(p => p.id === match.paper_id);
           if (!paper) {
@@ -81,19 +90,25 @@ const submitForm = (formEl: FormInstance | undefined) => {
             paper: {
               id: paper.id,
               title: paper.title,
-              authors: paper.authors
+              authors: paper.authors,
+              abstract: paper.abstract,
+              pdf_url: paper.pdf_url,
+              keywords: paper.keywords,
+              published_date: paper.published_date,
+              year: paper.year
             }
           };
         }).filter(match => match !== null) ?? [];
-        
         chatForm.response = res.response;
         papers.value = res.papers;
         matches.value = enrichedMatches;
-        
-        // 调试日志
+        kgTriples.value = (res as any).kg_triples || [];
+        kgMatches.value = (res as any).kg_matches || [];
         console.log('Response:', res.response);
         console.log('Matches:', enrichedMatches);
         console.log('Papers:', res.papers);
+        console.log('KG Triples:', kgTriples.value);
+        console.log('KG Matches:', kgMatches.value);
       } catch (e) {
         console.log(e);
         ElMessage.error('获取论文信息失败');
@@ -145,6 +160,7 @@ const submitForm = (formEl: FormInstance | undefined) => {
           <HighlightText 
             :text="renderMarkdown(chatForm.response)"
             :matches="matches ?? []"
+            :kgMatches="kgMatches ?? []"
           />
         </div>
       </div>

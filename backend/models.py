@@ -33,6 +33,7 @@ class Paper(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     is_processed = Column(Boolean, default=False)
+    is_kg_processed = Column(Boolean, default=False)
 
     users = relationship("UserPaperInteraction", back_populates="paper")
 
