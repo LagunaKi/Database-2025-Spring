@@ -143,7 +143,7 @@ async def chat_with_kg(conversation: schemas.Conversation):
         f"论文: {meta['title']}\n摘要: {doc}" for doc, meta in zip(papers_results['documents'][0], papers_results['metadatas'][0])
     ])
     kg_context = "\n".join([
-        f"知识: {meta['head']} -[{meta['relation']}]-> {meta['tail']} (来源: {meta['source']})" for meta in kg_results['metadatas'][0]
+        f"{meta['head']} -[{meta['relation']}]-> {meta['tail']}" for meta in kg_results['metadatas'][0]
     ])
     final_prompt = f"""
 请你作为一名专业的论文搜索与知识图谱问答助手，结合以下论文内容和知识图谱信息，**紧密围绕用户原始问题进行高质量、聚焦的回答**。

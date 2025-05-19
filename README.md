@@ -22,6 +22,7 @@ pip install -r requirements.txt
 cd ..
 cd backend_algo
 pip install -r requirements.txt
+pip install https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_core_sci_scibert-0.5.4.tar.gz
 ```  
 
 ### 安装前端依赖

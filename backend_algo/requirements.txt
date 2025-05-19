@@ -7,3 +7,5 @@ requests
 numpy
 chromadb
 openai
+scispacy
+spacy

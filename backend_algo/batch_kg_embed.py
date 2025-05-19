@@ -1,3 +1,10 @@
+"""
+# 普通批量处理（仅处理未处理论文）
+python batch_kg_embed.py
+
+# 重置知识图谱向量库并重置MySQL is_kg_processed
+python batch_kg_embed.py --reset
+"""
 import sys
 import time
 import argparse
@@ -12,6 +19,9 @@ import re
 import spacy
 import scispacy
 from spacy.tokens import Doc
+import os
+os.environ.pop("HTTP_PROXY", None)
+os.environ.pop("HTTPS_PROXY", None)
 
 # Add project root to path
 project_root = str(Path(__file__).parent.parent)
@@ -34,9 +44,9 @@ kg_collection = chroma_client.get_or_create_collection(
 
 # 加载SciSpacy模型
 try:
-    nlp = spacy.load("en_core_sci_lg")
+    nlp = spacy.load("en_core_sci_scibert")
 except Exception as e:
-    print("请先安装en_core_sci_lg模型: python -m spacy download en_core_sci_lg")
+    print("请先安装en_ner_sci_scibert模型: pip install https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_ner_sci_scibert-0.5.4.tar.gz")
     raise e
 
 # 实体类型映射
@@ -189,7 +199,12 @@ def batch_process_kg(batch_size: int = 10):
 
 def reset_kg():
     # 清空kg_triples向量库
-    kg_collection.delete(where={})
+    chroma_client.delete_collection("kg_triples")
+    global kg_collection
+    kg_collection = chroma_client.get_or_create_collection(
+        name="kg_triples",
+        embedding_function=openai_ef
+    )
     # MySQL所有论文is_kg_processed=0
     db = SessionLocal()
     try:
